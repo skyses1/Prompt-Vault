@@ -1,0 +1,114 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>提示词金库</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <main id="auth" class="auth-shell">
+    <section class="brand-panel">
+      <p class="eyebrow">Prompt Vault</p>
+      <h1>提示词金库</h1>
+      <p class="lead">把每一次好用的提示词沉淀成团队资产。保存、AI 整理、搜索、收藏，一条龙不掉链子。</p>
+      <div class="feature-grid">
+        <span>通义自动分类</span>
+        <span>Chrome 右键采集</span>
+        <span>云端同步</span>
+        <span>精髓标题</span>
+      </div>
+    </section>
+    <section class="auth-card">
+      <div class="tabs">
+        <button id="loginTab" class="active">登录</button>
+        <button id="registerTab">注册</button>
+      </div>
+      <form id="loginForm" class="form">
+        <label>邮箱<input id="loginEmail" type="email" placeholder="you@example.com" required /></label>
+        <label>密码<input id="loginPassword" type="password" placeholder="至少 8 位" required /></label>
+        <button class="primary" type="submit">进入金库</button>
+      </form>
+      <form id="registerForm" class="form hidden">
+        <label>名称<input id="registerName" placeholder="你的名字" required /></label>
+        <label>邮箱<input id="registerEmail" type="email" placeholder="you@example.com" required /></label>
+        <label>密码<input id="registerPassword" type="password" placeholder="至少 8 位" required /></label>
+        <button class="primary" type="submit">创建账号</button>
+      </form>
+      <p id="authMessage" class="message"></p>
+    </section>
+  </main>
+
+  <main id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="logo-block">
+        <div class="logo">金</div>
+        <div><strong>提示词金库</strong><small id="userInfo">云端工作台</small></div>
+      </div>
+      <nav>
+        <button class="nav active" data-filter="all">全部提示词</button>
+        <button class="nav" data-filter="favorite">我的收藏</button>
+        <button class="nav" data-filter="need_review">待人工确认</button>
+      </nav>
+      <div class="side-section">
+        <p>分类</p>
+        <div id="categoryList" class="category-list"></div>
+      </div>
+      <button id="logoutBtn" class="ghost full">退出登录</button>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Dashboard</p>
+          <h2>把灵感收进来，让 AI 先帮你归档</h2>
+        </div>
+        <button id="newPromptBtn" class="primary">新增提示词</button>
+      </header>
+
+      <section class="stats">
+        <div><span id="totalCount">0</span><p>总提示词</p></div>
+        <div><span id="favoriteCount">0</span><p>收藏</p></div>
+        <div><span id="reviewCount">0</span><p>待确认</p></div>
+      </section>
+
+      <section class="toolbar">
+        <input id="searchInput" placeholder="搜索标题、内容、摘要或来源网站..." />
+        <button id="searchBtn" class="secondary">搜索</button>
+        <button id="clearBtn" class="ghost">清空</button>
+      </section>
+
+      <section class="content-grid">
+        <div id="promptList" class="prompt-list"></div>
+        <article class="detail-card" id="detailCard">
+          <p class="empty">选择一个提示词查看详情，或点击“新增提示词”开始沉淀。</p>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="promptDialog">
+    <form id="promptForm" method="dialog" class="dialog-card">
+      <h3 id="dialogTitle">新增提示词</h3>
+      <input id="editId" type="hidden" />
+      <label>标题<input id="promptTitle" placeholder="留空则由 AI 生成" /></label>
+      <label>提示词内容<textarea id="promptContent" rows="8" placeholder="粘贴或输入提示词..." required></textarea></label>
+      <div class="split">
+        <label>来源标题<input id="sourceTitle" placeholder="例如 ChatGPT" /></label>
+        <label>来源 URL<input id="sourceUrl" placeholder="https://..." /></label>
+      </div>
+      <label>AI 整理模型<select id="aiModel"></select></label>
+      <label class="check"><input id="autoAnalyze" type="checkbox" checked /> 保存后使用通义/本地规则自动整理</label>
+      <div class="dialog-actions">
+        <button type="button" id="cancelDialog" class="ghost">取消</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+      <p id="dialogMessage" class="message"></p>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
