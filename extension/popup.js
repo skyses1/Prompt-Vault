@@ -48,35 +48,17 @@ async function readPageSelection() {
 async function insertIntoPage(text) {
   const tab = await getActiveTab();
   if (!tab?.id) return false;
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    args: [text],
-    func: (value) => {
-      function isEditable(el) {
-        if (!el) return false;
-        const tag = String(el.tagName || '').toLowerCase();
-        return el.isContentEditable || tag === 'textarea' || (tag === 'input' && !['button', 'submit', 'checkbox', 'radio'].includes(el.type));
-      }
-      const el = isEditable(document.activeElement) ? document.activeElement : document.querySelector('textarea, [contenteditable="true"], input[type="text"], input:not([type])');
-      if (!el) {
-        navigator.clipboard?.writeText(value);
-        return false;
-      }
-      el.focus();
-      if (el.isContentEditable) document.execCommand('insertText', false, value);
-      else {
-        const start = el.selectionStart ?? el.value.length;
-        const end = el.selectionEnd ?? el.value.length;
-        el.value = el.value.slice(0, start) + value + el.value.slice(end);
-        const pos = start + value.length;
-        el.setSelectionRange?.(pos, pos);
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      return true;
+  try {
+    return await chrome.tabs.sendMessage(tab.id, { type: 'PV_INSERT_TEXT', text });
+  } catch (_) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      return await chrome.tabs.sendMessage(tab.id, { type: 'PV_INSERT_TEXT', text });
+    } catch (error) {
+      await navigator.clipboard.writeText(text);
+      return false;
     }
-  });
-  return result;
+  }
 }
 
 async function requestJson(path, options = {}) {
