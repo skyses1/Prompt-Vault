@@ -1,0 +1,18 @@
+﻿{
+  "manifest_version": 3,
+  "name": "提示词金库采集器",
+  "version": "0.2.1",
+  "description": "保存选中文本、搜索收藏提示词，并插入到 AI 输入框。",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs", "clipboardWrite"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "提示词金库" }
+}
+
