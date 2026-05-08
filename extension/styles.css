@@ -1,0 +1,25 @@
+﻿body { width: 360px; margin: 0; background: #f8efd8; color: #1d2c22; font-family: "Microsoft YaHei", sans-serif; }
+main { padding: 14px; display: grid; gap: 10px; }
+header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+h1 { margin: 0; font-size: 22px; letter-spacing: -0.04em; }
+header p { margin: 4px 0 0; color: #66766b; font-size: 12px; }
+.panel { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid rgba(29,44,34,.12); }
+.hidden { display: none !important; }
+label { display: grid; gap: 5px; font-size: 12px; color: #657468; font-weight: 700; }
+input, textarea, select { border: 1px solid rgba(29,44,34,.16); border-radius: 12px; padding: 9px 10px; background: rgba(255,255,255,.75); outline: none; }
+button { border: 0; border-radius: 12px; padding: 10px 11px; background: #274433; color: white; font-weight: 800; cursor: pointer; }
+button:disabled { opacity: .65; cursor: wait; }
+button.light, .mini { background: #eadbb8; color: #274433; }
+.mini { padding: 7px 9px; font-size: 12px; }
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.favorites { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
+.fav { border: 1px solid rgba(29,44,34,.13); background: rgba(255,255,255,.56); border-radius: 14px; padding: 10px; display: grid; gap: 7px; }
+.fav strong { font-size: 14px; }
+.fav p, .empty { margin: 0; color: #657468; font-size: 12px; line-height: 1.45; }
+.fav div { display: flex; gap: 7px; }
+.fav button { padding: 7px 9px; font-size: 12px; }
+details { border: 1px dashed rgba(29,44,34,.18); border-radius: 12px; padding: 9px; display: grid; gap: 8px; }
+summary { cursor: pointer; color: #274433; font-weight: 800; font-size: 12px; }
+details textarea { margin-top: 8px; width: 100%; }
+.msg-inline { min-height: 18px; color: #2f7042; line-height: 1.45; margin: 0; font-size: 12px; word-break: break-word; }
+.bad { color: #b33a28 !important; }
