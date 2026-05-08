@@ -22,7 +22,21 @@
   function findEditable() {
     if (isEditable(document.activeElement)) return document.activeElement;
     if (isEditable(lastEditable)) return lastEditable;
-    return document.querySelector('textarea, [contenteditable="true"], input[type="text"], input:not([type])');
+    const selectors = [
+      '#prompt-textarea',
+      '[data-testid="prompt-textarea"]',
+      'div.ProseMirror[contenteditable="true"]',
+      'main [contenteditable="true"]',
+      'textarea',
+      '[contenteditable="true"]',
+      'input[type="text"]',
+      'input:not([type])'
+    ];
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (isEditable(el)) return el;
+    }
+    return null;
   }
 
   function insertText(text) {
@@ -34,7 +48,16 @@
     }
     el.focus();
     if (el.isContentEditable) {
+      const selection = window.getSelection();
+      if (selection && !selection.rangeCount) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
       document.execCommand('insertText', false, text);
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     } else {
       const start = el.selectionStart ?? el.value.length;
       const end = el.selectionEnd ?? el.value.length;
@@ -102,5 +125,6 @@
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === 'PV_OPEN_PICKER') openPicker(message.prompts || []);
+    if (message?.type === 'PV_INSERT_TEXT') return insertText(message.text || '');
   });
 })();
