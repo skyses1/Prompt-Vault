@@ -1,0 +1,37 @@
+﻿version: "3.9"
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-prompt_vault}
+      POSTGRES_USER: ${POSTGRES_USER:-prompt_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prompt_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prompt_user} -d ${POSTGRES_DB:-prompt_vault}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-prompt_user}:${POSTGRES_PASSWORD:-prompt_password}@postgres:5432/${POSTGRES_DB:-prompt_vault}
+      JWT_SECRET: ${JWT_SECRET:-change_this_jwt_secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      TONGYI_API_KEY: ${TONGYI_API_KEY:-}
+      TONGYI_MODEL: ${TONGYI_MODEL:-qwen-plus}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:3001"
+
+volumes:
+  postgres_data:
