@@ -74,6 +74,13 @@
     return true;
   }
 
+  async function copyAndInsert(text) {
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch (_) {}
+    return insertText(text);
+  }
+
   function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"]/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]));
   }
@@ -135,12 +142,12 @@
         <button class="pv-row ${index === panelState.selected ? 'active' : ''}" data-index="${index}">
           <div class="pv-title">${escapeHtml(p.title)}</div>
           <div class="pv-summary">${escapeHtml(p.summary || (p.content || '').slice(0, 110))}</div>
-          <div class="pv-meta">${escapeHtml(p.category?.name || '未分类')} · ${escapeHtml(p.sourceDomain || '网页端')} · ${(p.tags || []).slice(0, 3).map(escapeHtml).join(' / ')}</div>
+          <div class="pv-meta">${escapeHtml(p.category?.name || '未分类')} · ${escapeHtml(p.sourceDomain || '网页端')} · ${(p.tags || []).slice(0, 3).map(escapeHtml).join(' / ')} · 点击后复制并插入</div>
         </button>`).join('');
       list.querySelectorAll('.pv-row').forEach((row) => {
-        row.onclick = () => {
+        row.onclick = async () => {
           const item = panelState.items[Number(row.dataset.index)];
-          if (item) { insertText(item.content || ''); close(); }
+          if (item) { await copyAndInsert(item.content || ''); close(); }
         };
       });
     }
@@ -166,7 +173,7 @@
       if (event.key === 'Enter') {
         event.preventDefault();
         const item = panelState.items[panelState.selected];
-        if (item) { insertText(item.content || ''); close(); }
+        if (item) { copyAndInsert(item.content || ''); close(); }
       }
     };
     root.addEventListener('click', (event) => { if (event.target === root) close(); });
