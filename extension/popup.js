@@ -1,5 +1,6 @@
 ﻿const $ = (id) => document.getElementById(id);
 const state = { prompts: [], filtered: [], currentSelection: '', aiModels: [], defaultAiModel: '', searchTimer: null };
+const SHORTCUT_PRESETS = ['Ctrl+Shift+K', 'Ctrl+K', 'Alt+K', 'Alt+P', 'Ctrl+Shift+P', 'Custom'];
 
 const setMsg = (id, text, bad = false) => {
   const el = $(id);
@@ -107,10 +108,11 @@ function showLogin(cfg = {}) {
 }
 
 async function load() {
-  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult', 'favoriteOnly', 'shortcutEnabled']);
+  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult', 'favoriteOnly', 'shortcutEnabled', 'shortcutKey']);
   state.currentSelection = await readPageSelection();
   $('favoriteOnly').checked = Boolean(cfg.favoriteOnly);
   $('shortcutEnabled').checked = cfg.shortcutEnabled !== false;
+  initShortcutControls(cfg.shortcutKey || 'Ctrl+Shift+K');
   if (cfg.token && cfg.email) {
     showAuthed(cfg.email);
     await loadAiModels();
@@ -120,6 +122,42 @@ async function load() {
   } else {
     showLogin(cfg);
   }
+}
+
+function initShortcutControls(shortcutKey) {
+  $('shortcutPreset').innerHTML = SHORTCUT_PRESETS.map((item) => `<option value="${item}">${item === 'Custom' ? '自定义' : item}</option>`).join('');
+  const isPreset = SHORTCUT_PRESETS.includes(shortcutKey);
+  $('shortcutPreset').value = isPreset ? shortcutKey : 'Custom';
+  $('customShortcut').value = isPreset ? '' : shortcutKey;
+  $('customShortcutWrap').classList.toggle('hidden', $('shortcutPreset').value !== 'Custom');
+}
+
+function normalizeShortcut(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const parts = raw.split('+').map((part) => part.trim()).filter(Boolean);
+  const key = parts.pop();
+  if (!key) return '';
+  const mods = new Set(parts.map((part) => part.toLowerCase()));
+  const ordered = [];
+  if (mods.has('ctrl') || mods.has('control')) ordered.push('Ctrl');
+  if (mods.has('shift')) ordered.push('Shift');
+  if (mods.has('alt') || mods.has('option')) ordered.push('Alt');
+  if (mods.has('meta') || mods.has('cmd') || mods.has('command')) ordered.push('Meta');
+  const normalizedKey = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1);
+  if (!ordered.length) return '';
+  return [...ordered, normalizedKey].join('+');
+}
+
+async function saveShortcutSetting() {
+  let shortcutKey = $('shortcutPreset').value;
+  if (shortcutKey === 'Custom') shortcutKey = normalizeShortcut($('customShortcut').value);
+  if (!shortcutKey) {
+    msg('自定义快捷键格式不正确，例如 Ctrl+Alt+P', true);
+    return;
+  }
+  await chrome.storage.local.set({ shortcutEnabled: $('shortcutEnabled').checked, shortcutKey });
+  msg(`快捷键已设置：${shortcutKey}`);
 }
 
 async function loadPromptResults() {
@@ -199,7 +237,7 @@ async function login() {
       headers: {},
       body: JSON.stringify({ email, password })
     });
-    await chrome.storage.local.set({ apiBaseUrl, token: data.accessToken, email, lastResult: '登录成功。', shortcutEnabled: true, shortcutKey: 'Ctrl+Shift+K' });
+    await chrome.storage.local.set({ apiBaseUrl, token: data.accessToken, email, lastResult: '登录成功。', shortcutEnabled: true, shortcutKey: $('shortcutPreset')?.value === 'Custom' ? normalizeShortcut($('customShortcut').value) || 'Ctrl+Shift+K' : ($('shortcutPreset')?.value || 'Ctrl+Shift+K') });
     showAuthed(email);
     await loadAiModels();
     await loadPromptResults();
@@ -279,9 +317,13 @@ $('favoriteOnly').onchange = async () => {
   loadPromptResults();
 };
 $('shortcutEnabled').onchange = async () => {
-  await chrome.storage.local.set({ shortcutEnabled: $('shortcutEnabled').checked, shortcutKey: 'Ctrl+Shift+K' });
-  msg($('shortcutEnabled').checked ? '已启用 Ctrl+Shift+K 搜索面板。' : '已关闭快捷键搜索面板。');
+  await saveShortcutSetting();
 };
+$('shortcutPreset').onchange = async () => {
+  $('customShortcutWrap').classList.toggle('hidden', $('shortcutPreset').value !== 'Custom');
+  await saveShortcutSetting();
+};
+$('customShortcut').onchange = saveShortcutSetting;
 $('aiModel').onchange = async () => {
   await chrome.storage.local.set({ aiModel: $('aiModel').value });
   msg(`AI 整理模型已切换：${$('aiModel').value}`);
