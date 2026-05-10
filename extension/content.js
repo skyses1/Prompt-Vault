@@ -4,6 +4,20 @@
 
   let lastEditable = null;
   let panelState = { items: [], selected: 0, query: '', timer: null };
+  let shortcutSettings = { shortcutEnabled: true, shortcutKey: 'Ctrl+Shift+K' };
+
+  chrome.storage?.local?.get(['shortcutEnabled', 'shortcutKey'], (cfg) => {
+    shortcutSettings = {
+      shortcutEnabled: cfg.shortcutEnabled !== false,
+      shortcutKey: cfg.shortcutKey || 'Ctrl+Shift+K'
+    };
+  });
+
+  chrome.storage?.onChanged?.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.shortcutEnabled) shortcutSettings.shortcutEnabled = changes.shortcutEnabled.newValue !== false;
+    if (changes.shortcutKey) shortcutSettings.shortcutKey = changes.shortcutKey.newValue || 'Ctrl+Shift+K';
+  });
 
   function rememberEditable(event) {
     const target = event.target;
@@ -70,14 +84,6 @@
         if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
         if (!response?.success) return reject(new Error(response?.message || '搜索失败'));
         resolve(response.items || []);
-      });
-    });
-  }
-
-  function getSettings() {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'PV_GET_SETTINGS' }, (response) => {
-        resolve(response?.success ? response : { shortcutEnabled: true, shortcutKey: 'Ctrl+Shift+K' });
       });
     });
   }
@@ -168,10 +174,9 @@
     searchNow();
   }
 
-  document.addEventListener('keydown', async (event) => {
-    const settings = await getSettings();
-    if (settings.shortcutEnabled === false) return;
-    if (!eventMatchesShortcut(event, settings.shortcutKey || 'Ctrl+Shift+K')) return;
+  document.addEventListener('keydown', (event) => {
+    if (shortcutSettings.shortcutEnabled === false) return;
+    if (!eventMatchesShortcut(event, shortcutSettings.shortcutKey || 'Ctrl+Shift+K')) return;
     event.preventDefault();
     event.stopPropagation();
     openCommandPanel();
@@ -179,5 +184,9 @@
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === 'PV_INSERT_TEXT') return insertText(message.text || '');
+    if (message?.type === 'PV_OPEN_COMMAND_PANEL') {
+      openCommandPanel();
+      return true;
+    }
   });
 })();
