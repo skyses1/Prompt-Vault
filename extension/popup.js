@@ -1,5 +1,5 @@
 ﻿const $ = (id) => document.getElementById(id);
-const state = { favorites: [], filtered: [], currentSelection: '', aiModels: [], defaultAiModel: '' };
+const state = { prompts: [], filtered: [], currentSelection: '', aiModels: [], defaultAiModel: '', searchTimer: null };
 
 const setMsg = (id, text, bad = false) => {
   const el = $(id);
@@ -107,24 +107,31 @@ function showLogin(cfg = {}) {
 }
 
 async function load() {
-  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult']);
+  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult', 'favoriteOnly', 'shortcutEnabled']);
   state.currentSelection = await readPageSelection();
+  $('favoriteOnly').checked = Boolean(cfg.favoriteOnly);
+  $('shortcutEnabled').checked = cfg.shortcutEnabled !== false;
   if (cfg.token && cfg.email) {
     showAuthed(cfg.email);
     await loadAiModels();
-    await loadFavorites();
-    if (state.currentSelection) msg(`已检测到选中文字，可直接保存。`);
+    await loadPromptResults();
+    if (state.currentSelection) msg('已检测到选中文字，可直接保存。');
     else if (cfg.lastResult) msg(cfg.lastResult, cfg.lastResult.includes('失败'));
   } else {
     showLogin(cfg);
   }
 }
 
-async function loadFavorites() {
+async function loadPromptResults() {
   try {
-    const data = await requestJson('/prompts?favorite=true&pageSize=50');
-    state.favorites = data.items || [];
-    filterFavorites();
+    const q = $('search')?.value?.trim() || '';
+    const favoriteOnly = Boolean($('favoriteOnly')?.checked);
+    const params = new URLSearchParams({ pageSize: '50' });
+    if (q) params.set('q', q);
+    if (favoriteOnly) params.set('favorite', 'true');
+    const data = await requestJson(`/prompts?${params.toString()}`);
+    state.prompts = data.items || [];
+    filterPrompts();
   } catch (error) {
     msg(error.message, true);
   }
@@ -146,16 +153,16 @@ async function loadAiModels() {
   }
 }
 
-function filterFavorites() {
+function filterPrompts() {
   const q = $('search').value.trim().toLowerCase();
-  state.filtered = state.favorites.filter(p => !q || `${p.title} ${p.summary || ''} ${p.content || ''} ${(p.tags || []).join(' ')}`.toLowerCase().includes(q));
-  renderFavorites();
+  state.filtered = state.prompts.filter(p => !q || `${p.title} ${p.summary || ''} ${p.content || ''} ${(p.tags || []).join(' ')}`.toLowerCase().includes(q));
+  renderPrompts();
 }
 
-function renderFavorites() {
+function renderPrompts() {
   const box = $('favorites');
   if (!state.filtered.length) {
-    box.innerHTML = '<p class="empty">暂无收藏提示词。先在网页端点星标收藏。</p>';
+    box.innerHTML = '<p class="empty">没有匹配的提示词。</p>';
     return;
   }
   box.innerHTML = state.filtered.slice(0, 8).map((p, i) => `
@@ -192,11 +199,11 @@ async function login() {
       headers: {},
       body: JSON.stringify({ email, password })
     });
-    await chrome.storage.local.set({ apiBaseUrl, token: data.accessToken, email, lastResult: '登录成功。' });
+    await chrome.storage.local.set({ apiBaseUrl, token: data.accessToken, email, lastResult: '登录成功。', shortcutEnabled: true, shortcutKey: 'Ctrl+Shift+K' });
     showAuthed(email);
     await loadAiModels();
-    await loadFavorites();
-    msg('登录成功。收藏提示词会显示在这里。');
+    await loadPromptResults();
+    msg('登录成功。现在可以搜索全部提示词。');
   } catch (e) {
     loginMsg(e.message, true);
   } finally {
@@ -262,7 +269,19 @@ $('openWebBtn').onclick = async () => {
   const cfg = await chrome.storage.local.get(['apiBaseUrl']);
   chrome.tabs.create({ url: webUrlFromApi(cfg.apiBaseUrl || 'http://10.10.10.68:8080/api') });
 };
-$('search').oninput = filterFavorites;
+$('search').oninput = () => {
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(loadPromptResults, 250);
+};
+$('favoriteOnly').onchange = async () => {
+  await chrome.storage.local.set({ favoriteOnly: $('favoriteOnly').checked });
+  $('search').placeholder = $('favoriteOnly').checked ? '搜索收藏提示词...' : '搜索全部提示词...';
+  loadPromptResults();
+};
+$('shortcutEnabled').onchange = async () => {
+  await chrome.storage.local.set({ shortcutEnabled: $('shortcutEnabled').checked, shortcutKey: 'Ctrl+Shift+K' });
+  msg($('shortcutEnabled').checked ? '已启用 Ctrl+Shift+K 搜索面板。' : '已关闭快捷键搜索面板。');
+};
 $('aiModel').onchange = async () => {
   await chrome.storage.local.set({ aiModel: $('aiModel').value });
   msg(`AI 整理模型已切换：${$('aiModel').value}`);
