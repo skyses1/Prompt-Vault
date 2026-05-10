@@ -82,6 +82,21 @@
     });
   }
 
+  function eventMatchesShortcut(event, shortcutKey) {
+    const parts = String(shortcutKey || 'Ctrl+Shift+K').split('+').map((part) => part.trim()).filter(Boolean);
+    const key = parts.pop();
+    const mods = new Set(parts.map((part) => part.toLowerCase()));
+    const needCtrl = mods.has('ctrl') || mods.has('control');
+    const needShift = mods.has('shift');
+    const needAlt = mods.has('alt') || mods.has('option');
+    const needMeta = mods.has('meta') || mods.has('cmd') || mods.has('command');
+    if (Boolean(event.ctrlKey) !== needCtrl) return false;
+    if (Boolean(event.shiftKey) !== needShift) return false;
+    if (Boolean(event.altKey) !== needAlt) return false;
+    if (Boolean(event.metaKey) !== needMeta) return false;
+    return event.key.toLowerCase() === String(key || '').toLowerCase();
+  }
+
   async function openCommandPanel() {
     document.getElementById('pv-command-root')?.remove();
     panelState = { items: [], selected: 0, query: '', timer: null };
@@ -96,7 +111,7 @@
         #pv-command-list{display:grid;gap:8px;max-height:440px;overflow:auto;padding:0 14px 14px}.pv-row{border:1px solid rgba(29,44,34,.12);border-radius:16px;background:rgba(255,255,255,.62);padding:12px;text-align:left}.pv-row.active{border-color:#3f7a4c;background:#f4ecd5}.pv-title{font-weight:800;margin-bottom:5px}.pv-summary{font-size:12px;color:#68766c;line-height:1.45}.pv-meta{margin-top:7px;font-size:11px;color:#3f7a4c}.pv-empty{padding:18px;color:#68766c;font-size:13px}
       </style>
       <section id="pv-command">
-        <div id="pv-command-head"><strong>搜索提示词</strong><span>Ctrl+Shift+K 打开 · Enter 插入 · Esc 关闭</span></div>
+        <div id="pv-command-head"><strong>搜索提示词</strong><span>Enter 插入 · Esc 关闭</span></div>
         <input id="pv-command-input" placeholder="搜索全部提示词..." />
         <div id="pv-command-list"><div class="pv-empty">输入关键词搜索，或直接选择最近提示词。</div></div>
       </section>`;
@@ -154,9 +169,9 @@
   }
 
   document.addEventListener('keydown', async (event) => {
-    if (!(event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'k')) return;
     const settings = await getSettings();
     if (settings.shortcutEnabled === false) return;
+    if (!eventMatchesShortcut(event, settings.shortcutKey || 'Ctrl+Shift+K')) return;
     event.preventDefault();
     event.stopPropagation();
     openCommandPanel();
