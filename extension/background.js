@@ -8,9 +8,15 @@
   });
 }
 
-chrome.runtime.onInstalled.addListener(rebuildContextMenus);
+chrome.runtime.onInstalled.addListener(async () => {
+  rebuildContextMenus();
+  const cfg = await chrome.storage.local.get(['shortcutEnabled', 'shortcutKey']);
+  if (cfg.shortcutEnabled === undefined) await chrome.storage.local.set({ shortcutEnabled: true });
+  if (!cfg.shortcutKey) await chrome.storage.local.set({ shortcutKey: 'Ctrl+Shift+K' });
+});
 chrome.runtime.onStartup.addListener(rebuildContextMenus);
 rebuildContextMenus();
+
 function normalizeApiBaseUrl(value) {
   let url = String(value || '').trim();
   if (!url) return '';
@@ -20,8 +26,14 @@ function normalizeApiBaseUrl(value) {
 }
 
 async function getConfig() {
-  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'aiModel']);
-  return { apiBaseUrl: normalizeApiBaseUrl(cfg.apiBaseUrl), token: cfg.token, aiModel: cfg.aiModel };
+  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'aiModel', 'shortcutEnabled', 'shortcutKey']);
+  return {
+    apiBaseUrl: normalizeApiBaseUrl(cfg.apiBaseUrl),
+    token: cfg.token,
+    aiModel: cfg.aiModel,
+    shortcutEnabled: cfg.shortcutEnabled !== false,
+    shortcutKey: cfg.shortcutKey || 'Ctrl+Shift+K'
+  };
 }
 
 function domainFromUrl(url) {
@@ -64,6 +76,14 @@ async function saveSelection(payload) {
   });
 }
 
+async function searchPrompts(query = '', favoriteOnly = false) {
+  const params = new URLSearchParams({ pageSize: '30' });
+  if (query) params.set('q', query);
+  if (favoriteOnly) params.set('favorite', 'true');
+  const data = await requestJson(`/prompts?${params.toString()}`);
+  return data.items || [];
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
   if (info.menuItemId === 'save-selection-to-prompt-vault') {
@@ -92,3 +112,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  (async () => {
+    if (message?.type === 'PV_SEARCH_PROMPTS') {
+      const items = await searchPrompts(message.query || '', Boolean(message.favoriteOnly));
+      sendResponse({ success: true, items });
+      return;
+    }
+    if (message?.type === 'PV_GET_SETTINGS') {
+      const cfg = await getConfig();
+      sendResponse({ success: true, shortcutEnabled: cfg.shortcutEnabled, shortcutKey: cfg.shortcutKey });
+      return;
+    }
+  })().catch((error) => sendResponse({ success: false, message: error.message }));
+  return true;
+});
