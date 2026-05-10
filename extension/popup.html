@@ -29,7 +29,11 @@
         <button id="openWebBtn" type="button" class="light">打开网页</button>
       </div>
       <label>AI 整理模型<select id="aiModel"></select></label>
-      <input id="search" placeholder="搜索收藏提示词..." />
+      <div class="setting-row">
+        <label class="check"><input id="favoriteOnly" type="checkbox" /> 只看收藏</label>
+        <label class="check"><input id="shortcutEnabled" type="checkbox" /> Ctrl+Shift+K</label>
+      </div>
+      <input id="search" placeholder="搜索全部提示词..." />
       <div id="favorites" class="favorites"></div>
       <details>
         <summary>手动粘贴保存</summary>
