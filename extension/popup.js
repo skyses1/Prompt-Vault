@@ -229,8 +229,9 @@ function renderPrompts() {
   box.querySelectorAll('.fav').forEach((el) => {
     const p = state.filtered[Number(el.dataset.index)];
     el.querySelector('.insert').onclick = async () => {
+      await navigator.clipboard.writeText(p.content || '');
       const ok = await insertIntoPage(p.content || '');
-      msg(ok ? '已插入当前输入框。' : '未找到输入框，已尝试复制到剪贴板。', !ok);
+      msg(ok ? '已复制并插入当前输入框。' : '未找到输入框，已复制到剪贴板。', !ok);
     };
     el.querySelector('.copy').onclick = async () => {
       await navigator.clipboard.writeText(p.content || '');
