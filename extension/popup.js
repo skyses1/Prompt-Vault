@@ -62,6 +62,23 @@ async function insertIntoPage(text) {
   }
 }
 
+async function openPageSearchPanel() {
+  const tab = await getActiveTab();
+  if (!tab?.id) return false;
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'PV_OPEN_COMMAND_PANEL' });
+    return true;
+  } catch (_) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await chrome.tabs.sendMessage(tab.id, { type: 'PV_OPEN_COMMAND_PANEL' });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
 async function requestJson(path, options = {}) {
   const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token']);
   const apiBaseUrl = normalizeApiBaseUrl(cfg.apiBaseUrl || $('apiBaseUrl')?.value);
@@ -306,6 +323,10 @@ $('manualSaveBtn').onclick = async () => {
 $('openWebBtn').onclick = async () => {
   const cfg = await chrome.storage.local.get(['apiBaseUrl']);
   chrome.tabs.create({ url: webUrlFromApi(cfg.apiBaseUrl || 'http://10.10.10.68:8080/api') });
+};
+$('openPanelBtn').onclick = async () => {
+  const ok = await openPageSearchPanel();
+  msg(ok ? '已在当前页面打开搜索框。' : '当前页面不允许注入搜索框，请换到 ChatGPT 等普通网页后再试。', !ok);
 };
 $('search').oninput = () => {
   clearTimeout(state.searchTimer);
