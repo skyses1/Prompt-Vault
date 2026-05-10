@@ -53,6 +53,22 @@
       return false;
     }
     el.focus();
+    const beforeText = el.isContentEditable ? (el.innerText || el.textContent || '') : (el.value || '');
+    try {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/plain', text);
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dataTransfer
+      });
+      const pasteAccepted = el.dispatchEvent(pasteEvent);
+      const afterPasteText = el.isContentEditable ? (el.innerText || el.textContent || '') : (el.value || '');
+      if (afterPasteText.includes(text.slice(0, Math.min(30, text.length)))) return true;
+      if (!pasteAccepted) {
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: text }));
+      }
+    } catch (_) {}
     if (el.isContentEditable) {
       const selection = window.getSelection();
       const range = document.createRange();
