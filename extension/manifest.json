@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 3,
   "name": "提示词金库采集器",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "保存选中文本、搜索收藏提示词，并插入到 AI 输入框。",
   "permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
@@ -15,6 +15,7 @@
   ],
   "action": { "default_popup": "popup.html", "default_title": "提示词金库" }
 }
+
 
 
 
