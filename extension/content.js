@@ -3,6 +3,7 @@
   window.__promptVaultContentLoaded = true;
 
   let lastEditable = null;
+  let panelState = { items: [], selected: 0, query: '', timer: null };
 
   function rememberEditable(event) {
     const target = event.target;
@@ -20,18 +21,9 @@
   }
 
   function findEditable() {
-    if (isEditable(document.activeElement)) return document.activeElement;
+    if (isEditable(document.activeElement) && !document.activeElement.closest?.('#pv-command-root')) return document.activeElement;
     if (isEditable(lastEditable)) return lastEditable;
-    const selectors = [
-      '#prompt-textarea',
-      '[data-testid="prompt-textarea"]',
-      'div.ProseMirror[contenteditable="true"]',
-      'main [contenteditable="true"]',
-      'textarea',
-      '[contenteditable="true"]',
-      'input[type="text"]',
-      'input:not([type])'
-    ];
+    const selectors = ['#prompt-textarea', '[data-testid="prompt-textarea"]', 'div.ProseMirror[contenteditable="true"]', 'main [contenteditable="true"]', 'textarea', '[contenteditable="true"]', 'input[type="text"]', 'input:not([type])'];
     for (const selector of selectors) {
       const el = document.querySelector(selector);
       if (isEditable(el)) return el;
@@ -49,13 +41,11 @@
     el.focus();
     if (el.isContentEditable) {
       const selection = window.getSelection();
-      if (selection && !selection.rangeCount) {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
       document.execCommand('insertText', false, text);
       el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     } else {
@@ -74,57 +64,105 @@
     return String(str ?? '').replace(/[&<>"]/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[s]));
   }
 
-  function openPicker(prompts) {
-    document.getElementById('pv-picker-root')?.remove();
-    const root = document.createElement('div');
-    root.id = 'pv-picker-root';
-    root.innerHTML = `
-      <style>
-        #pv-picker-root{position:fixed;z-index:2147483647;inset:0;background:rgba(16,24,19,.22);font-family:"Microsoft YaHei",sans-serif;color:#1d2c22;}
-        #pv-picker{position:absolute;right:24px;top:24px;width:min(420px,calc(100vw - 32px));max-height:min(680px,calc(100vh - 48px));background:#fff8e6;border:1px solid rgba(29,44,34,.16);border-radius:22px;box-shadow:0 24px 70px rgba(20,31,24,.24);overflow:hidden;display:flex;flex-direction:column;}
-        #pv-head{padding:16px 18px;background:#274433;color:#fff8e6;display:flex;align-items:center;justify-content:space-between;gap:12px;}
-        #pv-head strong{font-size:17px;} #pv-close{border:0;background:rgba(255,255,255,.16);color:white;border-radius:10px;padding:6px 10px;cursor:pointer;}
-        #pv-search{margin:12px;border:1px solid rgba(29,44,34,.16);border-radius:14px;padding:11px 12px;outline:none;}
-        #pv-list{overflow:auto;padding:0 12px 12px;display:grid;gap:10px;}
-        .pv-item{border:1px solid rgba(29,44,34,.12);background:rgba(255,255,255,.62);border-radius:16px;padding:12px;text-align:left;}
-        .pv-title{font-weight:800;margin-bottom:6px;}.pv-summary{font-size:12px;color:#68766c;line-height:1.5;margin-bottom:10px;}
-        .pv-actions{display:flex;gap:8px}.pv-actions button{border:0;border-radius:10px;padding:8px 10px;cursor:pointer;font-weight:700}.pv-insert{background:#274433;color:#fff}.pv-copy{background:#eadbb8;color:#274433;}
-      </style>
-      <section id="pv-picker">
-        <div id="pv-head"><strong>插入收藏提示词</strong><button id="pv-close">关闭</button></div>
-        <input id="pv-search" placeholder="搜索收藏提示词..." />
-        <div id="pv-list"></div>
-      </section>`;
-    document.documentElement.appendChild(root);
-
-    const list = root.querySelector('#pv-list');
-    const search = root.querySelector('#pv-search');
-    const close = () => root.remove();
-    root.querySelector('#pv-close').onclick = close;
-    root.addEventListener('click', (event) => { if (event.target === root) close(); });
-
-    function render() {
-      const q = search.value.trim().toLowerCase();
-      const filtered = prompts.filter(p => !q || `${p.title} ${p.summary || ''} ${p.content || ''} ${(p.tags || []).join(' ')}`.toLowerCase().includes(q));
-      list.innerHTML = filtered.map((p, index) => `
-        <article class="pv-item" data-index="${index}">
-          <div class="pv-title">${escapeHtml(p.title)}</div>
-          <div class="pv-summary">${escapeHtml(p.summary || (p.content || '').slice(0, 80))}</div>
-          <div class="pv-actions"><button class="pv-insert">插入</button><button class="pv-copy">复制</button></div>
-        </article>`).join('') || '<div class="pv-summary">没有匹配的收藏提示词</div>';
-      list.querySelectorAll('.pv-item').forEach((item) => {
-        const p = filtered[Number(item.dataset.index)];
-        item.querySelector('.pv-insert').onclick = () => { insertText(p.content || ''); close(); };
-        item.querySelector('.pv-copy').onclick = async () => { await navigator.clipboard.writeText(p.content || ''); item.querySelector('.pv-copy').textContent = '已复制'; };
+  function requestSearch(query, favoriteOnly = false) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'PV_SEARCH_PROMPTS', query, favoriteOnly }, (response) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!response?.success) return reject(new Error(response?.message || '搜索失败'));
+        resolve(response.items || []);
       });
-    }
-    search.oninput = render;
-    render();
-    setTimeout(() => search.focus(), 80);
+    });
   }
 
+  function getSettings() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'PV_GET_SETTINGS' }, (response) => {
+        resolve(response?.success ? response : { shortcutEnabled: true, shortcutKey: 'Ctrl+Shift+K' });
+      });
+    });
+  }
+
+  async function openCommandPanel() {
+    document.getElementById('pv-command-root')?.remove();
+    panelState = { items: [], selected: 0, query: '', timer: null };
+    const root = document.createElement('div');
+    root.id = 'pv-command-root';
+    root.innerHTML = `
+      <style>
+        #pv-command-root{position:fixed;z-index:2147483647;inset:0;background:rgba(15,24,18,.28);font-family:"Microsoft YaHei",sans-serif;color:#1d2c22;}
+        #pv-command{position:absolute;left:50%;top:12vh;transform:translateX(-50%);width:min(720px,calc(100vw - 28px));background:#fff8e6;border:1px solid rgba(29,44,34,.16);border-radius:24px;box-shadow:0 30px 90px rgba(20,31,24,.28);overflow:hidden;}
+        #pv-command-head{padding:14px 16px;background:#274433;color:#fff8e6;display:flex;justify-content:space-between;gap:12px;align-items:center}#pv-command-head strong{font-size:16px}#pv-command-head span{font-size:12px;opacity:.78}
+        #pv-command-input{width:calc(100% - 28px);margin:14px;border:1px solid rgba(29,44,34,.16);border-radius:16px;padding:13px 14px;font-size:15px;outline:none;background:rgba(255,255,255,.82)}
+        #pv-command-list{display:grid;gap:8px;max-height:440px;overflow:auto;padding:0 14px 14px}.pv-row{border:1px solid rgba(29,44,34,.12);border-radius:16px;background:rgba(255,255,255,.62);padding:12px;text-align:left}.pv-row.active{border-color:#3f7a4c;background:#f4ecd5}.pv-title{font-weight:800;margin-bottom:5px}.pv-summary{font-size:12px;color:#68766c;line-height:1.45}.pv-meta{margin-top:7px;font-size:11px;color:#3f7a4c}.pv-empty{padding:18px;color:#68766c;font-size:13px}
+      </style>
+      <section id="pv-command">
+        <div id="pv-command-head"><strong>搜索提示词</strong><span>Ctrl+Shift+K 打开 · Enter 插入 · Esc 关闭</span></div>
+        <input id="pv-command-input" placeholder="搜索全部提示词..." />
+        <div id="pv-command-list"><div class="pv-empty">输入关键词搜索，或直接选择最近提示词。</div></div>
+      </section>`;
+    document.documentElement.appendChild(root);
+    const input = root.querySelector('#pv-command-input');
+    const list = root.querySelector('#pv-command-list');
+    const close = () => root.remove();
+
+    function render() {
+      if (!panelState.items.length) {
+        list.innerHTML = '<div class="pv-empty">没有匹配的提示词。</div>';
+        return;
+      }
+      list.innerHTML = panelState.items.slice(0, 10).map((p, index) => `
+        <button class="pv-row ${index === panelState.selected ? 'active' : ''}" data-index="${index}">
+          <div class="pv-title">${escapeHtml(p.title)}</div>
+          <div class="pv-summary">${escapeHtml(p.summary || (p.content || '').slice(0, 110))}</div>
+          <div class="pv-meta">${escapeHtml(p.category?.name || '未分类')} · ${escapeHtml(p.sourceDomain || '网页端')} · ${(p.tags || []).slice(0, 3).map(escapeHtml).join(' / ')}</div>
+        </button>`).join('');
+      list.querySelectorAll('.pv-row').forEach((row) => {
+        row.onclick = () => {
+          const item = panelState.items[Number(row.dataset.index)];
+          if (item) { insertText(item.content || ''); close(); }
+        };
+      });
+    }
+
+    async function searchNow() {
+      try {
+        panelState.items = await requestSearch(input.value.trim(), false);
+        panelState.selected = 0;
+        render();
+      } catch (error) {
+        list.innerHTML = `<div class="pv-empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    input.oninput = () => {
+      clearTimeout(panelState.timer);
+      panelState.timer = setTimeout(searchNow, 220);
+    };
+    input.onkeydown = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      if (event.key === 'ArrowDown') { event.preventDefault(); panelState.selected = Math.min(panelState.items.length - 1, panelState.selected + 1); render(); }
+      if (event.key === 'ArrowUp') { event.preventDefault(); panelState.selected = Math.max(0, panelState.selected - 1); render(); }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const item = panelState.items[panelState.selected];
+        if (item) { insertText(item.content || ''); close(); }
+      }
+    };
+    root.addEventListener('click', (event) => { if (event.target === root) close(); });
+    setTimeout(() => input.focus(), 60);
+    searchNow();
+  }
+
+  document.addEventListener('keydown', async (event) => {
+    if (!(event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'k')) return;
+    const settings = await getSettings();
+    if (settings.shortcutEnabled === false) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openCommandPanel();
+  }, true);
+
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === 'PV_OPEN_PICKER') openPicker(message.prompts || []);
     if (message?.type === 'PV_INSERT_TEXT') return insertText(message.text || '');
   });
 })();
