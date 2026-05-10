@@ -31,8 +31,10 @@
       <label>AI 整理模型<select id="aiModel"></select></label>
       <div class="setting-row">
         <label class="check"><input id="favoriteOnly" type="checkbox" /> 只看收藏</label>
-        <label class="check"><input id="shortcutEnabled" type="checkbox" /> Ctrl+Shift+K</label>
+        <label class="check"><input id="shortcutEnabled" type="checkbox" /> 启用快捷键</label>
       </div>
+      <label>快捷键预设<select id="shortcutPreset"></select></label>
+      <label id="customShortcutWrap" class="hidden">自定义快捷键<input id="customShortcut" placeholder="例如 Ctrl+Alt+P" /></label>
       <input id="search" placeholder="搜索全部提示词..." />
       <div id="favorites" class="favorites"></div>
       <details>
