@@ -138,9 +138,10 @@ function showLogin(cfg = {}) {
 }
 
 async function load() {
-  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult', 'favoriteOnly', 'shortcutEnabled', 'shortcutKey']);
+  const cfg = await chrome.storage.local.get(['apiBaseUrl', 'token', 'email', 'lastResult', 'favoriteOnly', 'shortcutEnabled', 'shortcutKey', 'saveContentType']);
   state.currentSelection = await readPageSelection();
   $('favoriteOnly').checked = Boolean(cfg.favoriteOnly);
+  $('saveContentType').value = cfg.saveContentType || 'auto';
   $('shortcutEnabled').checked = cfg.shortcutEnabled !== false;
   initShortcutControls(cfg.shortcutKey || 'Ctrl+Shift+K');
   if (cfg.token && cfg.email) {
@@ -290,10 +291,12 @@ async function login() {
 async function saveContent(content, sourceTitle = '') {
   if (!content.trim()) throw new Error('保存内容为空');
   const tab = await getActiveTab();
+  const saveContentType = $('saveContentType')?.value || 'auto';
   const data = await requestJson('/extension/save-selection', {
     method: 'POST',
     body: JSON.stringify({
       content: content.trim(),
+      contentType: saveContentType === 'auto' ? undefined : saveContentType,
       sourceTitle: sourceTitle || tab?.title || 'Chrome 插件提交',
       sourceUrl: tab?.url || '',
       sourceDomain: domainFromUrl(tab?.url || ''),
@@ -369,6 +372,10 @@ $('favoriteOnly').onchange = async () => {
   await chrome.storage.local.set({ favoriteOnly: $('favoriteOnly').checked });
   $('search').placeholder = $('favoriteOnly').checked ? '搜索收藏提示词...' : '搜索全部提示词...';
   loadPromptResults();
+};
+$('saveContentType').onchange = async () => {
+  await chrome.storage.local.set({ saveContentType: $('saveContentType').value });
+  msg(`保存类型已切换：${$('saveContentType').selectedOptions[0]?.textContent || 'AI 自动识别'}`);
 };
 $('shortcutEnabled').onchange = async () => {
   await saveShortcutSetting();
