@@ -170,6 +170,7 @@ async function loadPrompts() {
   if (state.categoryId) params.set('categoryId', state.categoryId);
   if (state.filter === 'favorite') params.set('favorite', 'true');
   if (state.filter === 'need_review') params.set('aiStatus', 'need_review');
+  if (state.filter.startsWith('type_')) params.set('contentType', state.filter.replace('type_', ''));
   if (state.filter === 'recent') params.set('sort', 'recent_used');
   if (state.filter === 'frequent') params.set('sort', 'frequent');
   const data = await api(`/api/prompts?${params.toString()}`);
@@ -185,7 +186,7 @@ function renderPrompts() {
   $('favoriteCount').textContent = state.prompts.filter(p => p.isFavorite).length;
   $('reviewCount').textContent = state.prompts.filter(p => p.aiStatus === 'need_review' || p.aiStatus === 'failed').length;
   if (!state.prompts.length) {
-    $('promptList').innerHTML = '<div class="empty-list">还没有提示词。点右上角新增，或者用 Chrome 插件保存选中文本。</div>';
+    $('promptList').innerHTML = '<div class="empty-list">还没有内容。点右上角新增，或者用 Chrome 插件保存选中文本。</div>';
     return;
   }
   $('promptList').innerHTML = state.prompts.map(p => `
@@ -197,6 +198,7 @@ function renderPrompts() {
       </div>
       <p>${escapeHtml(p.summary || p.content.slice(0, 72))}</p>
       <div class="compact-info">
+        <span>${escapeHtml(p.contentTypeLabel || '提示词')}</span>
         <span>${escapeHtml(p.category?.name || '未分类')}</span>
         <span>${escapeHtml(p.sourceDomain || '网页端')}</span>
         ${p.isManualConfirmed ? '<em>人工确认</em>' : ''}
@@ -227,7 +229,7 @@ function renderDetail() {
   if (!p) return;
   $('detailCard').innerHTML = `
     <div class="detail-head">
-      <div><p class="eyebrow">${escapeHtml(p.category?.name || '未分类')}</p><h3>${escapeHtml(p.title)}</h3></div>
+      <div><p class="eyebrow">${escapeHtml(p.contentTypeLabel || '提示词')} · ${escapeHtml(p.category?.name || '未分类')}</p><h3>${escapeHtml(p.title)}</h3></div>
       <button class="star" id="favBtn">${p.isFavorite ? '★' : '☆'}</button>
     </div>
     <p class="summary">${escapeHtml(p.summary || '暂无摘要')}</p>
@@ -238,6 +240,7 @@ function renderDetail() {
     </details>
     <div class="tags big">${(p.tags || []).map(t => `<em>${escapeHtml(t)}</em>`).join('')}</div>
     <dl>
+      <dt>类型</dt><dd>${escapeHtml(p.contentTypeLabel || '提示词')}</dd>
       <dt>来源</dt><dd>${p.sourceUrl ? `<a href="${escapeAttr(p.sourceUrl)}" target="_blank">${escapeHtml(p.sourceDomain || p.sourceUrl)}</a>` : escapeHtml(p.sourceDomain || '网页端')}</dd>
       <dt>AI 状态</dt><dd>${escapeHtml(p.aiStatus)} / 置信度 ${p.aiConfidence ?? '-'}</dd>
       <dt>AI 模型</dt><dd>${escapeHtml(p.aiModel || '未记录')}</dd>
@@ -281,6 +284,7 @@ function formatRawPromptMarkdown(p) {
     '',
     '## 基础信息',
     '',
+    `- 类型：${p.contentTypeLabel || '提示词'}`,
     `- 分类：${p.category?.name || '未分类'}`,
     `- 标签：${tags}`,
     `- 来源：${source}`,
@@ -389,6 +393,7 @@ function openNewDialog() {
   $('promptContent').value = '';
   $('sourceTitle').value = '';
   $('sourceUrl').value = '';
+  $('contentType').value = 'prompt';
   $('autoAnalyze').checked = true;
   $('aiModel').value = state.defaultAiModel || state.aiModels[0] || '';
   message('dialogMessage', '');
@@ -403,6 +408,7 @@ function openEditDialog() {
   $('promptContent').value = p.content || '';
   $('sourceTitle').value = p.sourceTitle || '';
   $('sourceUrl').value = p.sourceUrl || '';
+  $('contentType').value = p.contentType || 'prompt';
   $('autoAnalyze').checked = false;
   $('aiModel').value = p.aiModel || state.defaultAiModel || state.aiModels[0] || '';
   message('dialogMessage', '');
@@ -481,6 +487,7 @@ async function submitPromptForm(forceSave) {
     content: $('promptContent').value.trim(),
     sourceTitle: $('sourceTitle').value.trim(),
     sourceUrl: $('sourceUrl').value.trim(),
+    contentType: $('contentType').value,
     autoAnalyze: $('autoAnalyze').checked,
     aiModel: $('aiModel').value,
     forceSave,
