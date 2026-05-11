@@ -90,12 +90,13 @@
     return true;
   }
 
-  async function copyAndInsert(text) {
+  async function copyAndInsert(text, promptId = '') {
     const filled = fillTemplateVariables(text);
     if (filled === null) return false;
     try {
       await navigator.clipboard?.writeText(filled);
     } catch (_) {}
+    if (promptId) chrome.runtime.sendMessage({ type: 'PV_RECORD_USE', promptId }, () => void chrome.runtime.lastError);
     return insertText(filled);
   }
 
@@ -178,7 +179,7 @@
       list.querySelectorAll('.pv-row').forEach((row) => {
         row.onclick = async () => {
           const item = panelState.items[Number(row.dataset.index)];
-          if (item) { await copyAndInsert(item.content || ''); close(); }
+          if (item) { await copyAndInsert(item.content || '', item.id); close(); }
         };
       });
     }
@@ -204,7 +205,7 @@
       if (event.key === 'Enter') {
         event.preventDefault();
         const item = panelState.items[panelState.selected];
-        if (item) { copyAndInsert(item.content || ''); close(); }
+        if (item) { copyAndInsert(item.content || '', item.id); close(); }
       }
     };
     root.addEventListener('click', (event) => { if (event.target === root) close(); });
