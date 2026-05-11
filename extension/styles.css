@@ -26,3 +26,6 @@ summary { cursor: pointer; color: #274433; font-weight: 800; font-size: 12px; }
 details textarea { margin-top: 8px; width: 100%; }
 .msg-inline { min-height: 18px; color: #2f7042; line-height: 1.45; margin: 0; font-size: 12px; word-break: break-word; }
 .bad { color: #b33a28 !important; }
+
+body.sidepanel { width: auto; min-width: 320px; }
+body.sidepanel .favorites { max-height: calc(100vh - 430px); }
