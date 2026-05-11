@@ -30,6 +30,15 @@
       </div>
       <button id="openSidePanelBtn" type="button" class="light">打开浏览器侧边栏</button>
       <button id="openPanelBtn" type="button" class="light">测试打开搜索框</button>
+      <label>保存类型
+        <select id="saveContentType">
+          <option value="auto">AI 自动识别</option>
+          <option value="prompt">提示词</option>
+          <option value="inspiration">灵感记录</option>
+          <option value="web_excerpt">网页摘录</option>
+          <option value="review">待审阅资料</option>
+        </select>
+      </label>
       <label>AI 整理模型<select id="aiModel"></select></label>
       <div class="setting-row">
         <label class="check"><input id="favoriteOnly" type="checkbox" /> 只看收藏</label>
