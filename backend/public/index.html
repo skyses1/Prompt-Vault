@@ -51,9 +51,11 @@
         <button class="nav active" data-filter="all">全部提示词</button>
         <button class="nav" data-filter="favorite">我的收藏</button>
         <button class="nav" data-filter="need_review">待人工确认</button>
+        <button class="nav" data-filter="recent">最近使用</button>
+        <button class="nav" data-filter="frequent">高频提示词</button>
       </nav>
       <div class="side-section">
-        <p>分类</p>
+        <p>分类 <button id="manageCategoriesBtn" class="tiny" type="button">管理</button></p>
         <div id="categoryList" class="category-list"></div>
       </div>
       <button id="logoutBtn" class="ghost full">退出登录</button>
@@ -80,9 +82,23 @@
       </section>
 
       <section class="toolbar">
+        <select id="searchMode">
+          <option value="keyword">关键词</option>
+          <option value="semantic">语义相似</option>
+        </select>
         <input id="searchInput" placeholder="搜索标题、内容、摘要或来源网站..." />
         <button id="searchBtn" class="secondary">搜索</button>
         <button id="clearBtn" class="ghost">清空</button>
+      </section>
+
+      <section id="bulkBar" class="bulk-bar hidden">
+        <strong>已选择 <span id="selectedCount">0</span> 条</strong>
+        <select id="bulkCategory"></select>
+        <input id="bulkCategoryName" placeholder="或输入新分类名称" />
+        <button id="bulkCategorizeBtn" class="secondary">手动归类</button>
+        <button id="bulkReanalyzeBtn" class="ghost">批量 AI 整理</button>
+        <button id="bulkErrorBtn" class="danger">归为错误</button>
+        <button id="clearSelectionBtn" class="ghost">取消选择</button>
       </section>
 
       <section class="content-grid">
@@ -133,6 +149,19 @@
         <button type="submit" class="primary">开始导入</button>
       </div>
       <p id="importMessage" class="message"></p>
+    </form>
+  </dialog>
+
+  <dialog id="categoryDialog">
+    <form id="categoryForm" method="dialog" class="dialog-card">
+      <h3>分类管理</h3>
+      <label>新增分类<input id="newCategoryName" placeholder="例如：品牌资产" /></label>
+      <button id="addCategoryBtn" type="button" class="primary">新增分类</button>
+      <div id="categoryManageList" class="manage-list"></div>
+      <div class="dialog-actions">
+        <button type="button" id="closeCategoryDialog" class="ghost">关闭</button>
+      </div>
+      <p id="categoryMessage" class="message"></p>
     </form>
   </dialog>
 
