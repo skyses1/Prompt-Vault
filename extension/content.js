@@ -91,10 +91,25 @@
   }
 
   async function copyAndInsert(text) {
+    const filled = fillTemplateVariables(text);
+    if (filled === null) return false;
     try {
-      await navigator.clipboard?.writeText(text);
+      await navigator.clipboard?.writeText(filled);
     } catch (_) {}
-    return insertText(text);
+    return insertText(filled);
+  }
+
+  function fillTemplateVariables(text) {
+    const template = String(text || '');
+    const names = [...new Set([...template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1].trim()).filter(Boolean))];
+    if (!names.length) return template;
+    const values = {};
+    for (const name of names) {
+      const value = prompt(`填写变量：${name}`, '');
+      if (value === null) return null;
+      values[name] = value;
+    }
+    return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name) => values[String(name).trim()] ?? '');
   }
 
   function escapeHtml(str) {
