@@ -6,9 +6,11 @@
   aiModels: [],
   defaultAiModel: '',
   selected: null,
+  selectedIds: new Set(),
   filter: 'all',
   categoryId: '',
   q: '',
+  searchMode: 'keyword',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -65,17 +67,24 @@ function bindEvents() {
   $('registerForm').onsubmit = register;
   $('logoutBtn').onclick = logout;
   $('newPromptBtn').onclick = openNewDialog;
+  $('manageCategoriesBtn').onclick = openCategoryDialog;
   $('importBtn').onclick = openImportDialog;
   $('exportMdBtn').onclick = () => exportPrompts('markdown');
   $('exportJsonBtn').onclick = () => exportPrompts('json');
   $('cancelDialog').onclick = () => $('promptDialog').close();
   $('cancelImportDialog').onclick = () => $('importDialog').close();
+  $('closeCategoryDialog').onclick = () => $('categoryDialog').close();
+  $('addCategoryBtn').onclick = addCategory;
+  $('bulkCategorizeBtn').onclick = bulkCategorize;
+  $('bulkReanalyzeBtn').onclick = bulkReanalyze;
+  $('bulkErrorBtn').onclick = bulkMarkError;
+  $('clearSelectionBtn').onclick = clearSelection;
   $('promptForm').onsubmit = savePrompt;
   $('importForm').onsubmit = importPrompts;
-  $('searchBtn').onclick = () => { state.q = $('searchInput').value.trim(); loadPrompts(); };
-  $('clearBtn').onclick = () => { $('searchInput').value = ''; state.q = ''; state.filter = 'all'; state.categoryId = ''; setNavActive(); loadPrompts(); };
+  $('searchBtn').onclick = () => { state.q = $('searchInput').value.trim(); state.searchMode = $('searchMode').value; clearSelection(false); loadPrompts(); };
+  $('clearBtn').onclick = () => { $('searchInput').value = ''; state.q = ''; state.filter = 'all'; state.categoryId = ''; state.searchMode = 'keyword'; $('searchMode').value = 'keyword'; clearSelection(false); setNavActive(); loadPrompts(); };
   $('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('searchBtn').click(); });
-  document.querySelectorAll('.nav').forEach((btn) => btn.onclick = () => { state.filter = btn.dataset.filter; state.categoryId = ''; setNavActive(); loadPrompts(); });
+  document.querySelectorAll('.nav').forEach((btn) => btn.onclick = () => { state.filter = btn.dataset.filter; state.categoryId = ''; clearSelection(false); setNavActive(); loadPrompts(); });
 }
 
 function switchTab(tab) {
@@ -144,7 +153,9 @@ async function loadAiModels() {
 async function loadCategories() {
   state.categories = await api('/api/categories');
   $('categoryList').innerHTML = state.categories.map(c => `<button class="cat" data-id="${c.id}">${c.name}<span>${c.promptCount || 0}</span></button>`).join('');
-  document.querySelectorAll('.cat').forEach((btn) => btn.onclick = () => { state.categoryId = btn.dataset.id; state.filter = 'all'; setNavActive(); loadPrompts(); });
+  $('bulkCategory').innerHTML = '<option value="">选择分类</option>' + state.categories.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+  document.querySelectorAll('.cat').forEach((btn) => btn.onclick = () => { state.categoryId = btn.dataset.id; state.filter = 'all'; clearSelection(false); setNavActive(); loadPrompts(); });
+  if ($('categoryDialog').open) renderCategoryManageList();
 }
 
 function setNavActive() {
@@ -155,12 +166,17 @@ function setNavActive() {
 async function loadPrompts() {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
+  if (state.searchMode === 'semantic') params.set('searchMode', 'semantic');
   if (state.categoryId) params.set('categoryId', state.categoryId);
   if (state.filter === 'favorite') params.set('favorite', 'true');
   if (state.filter === 'need_review') params.set('aiStatus', 'need_review');
+  if (state.filter === 'recent') params.set('sort', 'recent_used');
+  if (state.filter === 'frequent') params.set('sort', 'frequent');
   const data = await api(`/api/prompts?${params.toString()}`);
   state.prompts = data.items;
+  state.selectedIds = new Set([...state.selectedIds].filter((id) => state.prompts.some((p) => p.id === id)));
   renderPrompts();
+  renderBulkBar();
   await loadCategories();
 }
 
@@ -173,17 +189,31 @@ function renderPrompts() {
     return;
   }
   $('promptList').innerHTML = state.prompts.map(p => `
-    <button class="prompt-card ${state.selected?.id === p.id ? 'active' : ''}" data-id="${p.id}">
-      <div class="card-head"><strong>${escapeHtml(p.title)}</strong><span>${p.isFavorite ? '★' : '☆'}</span></div>
+    <article class="prompt-card ${state.selected?.id === p.id ? 'active' : ''}" data-id="${p.id}">
+      <div class="card-head">
+        <label class="select-check"><input type="checkbox" data-id="${p.id}" ${state.selectedIds.has(p.id) ? 'checked' : ''} /></label>
+        <strong>${escapeHtml(p.title)}</strong>
+        <span>${p.isFavorite ? '★' : '☆'}</span>
+      </div>
       <p>${escapeHtml(p.summary || p.content.slice(0, 72))}</p>
       <div class="compact-info">
         <span>${escapeHtml(p.category?.name || '未分类')}</span>
         <span>${escapeHtml(p.sourceDomain || '网页端')}</span>
+        ${p.isManualConfirmed ? '<em>人工确认</em>' : ''}
+        ${p.usageCount ? `<em>用 ${p.usageCount}</em>` : ''}
         ${(p.tags || []).slice(0, 2).map(t => `<em>${escapeHtml(t)}</em>`).join('')}
       </div>
-    </button>
+    </article>
   `).join('');
   document.querySelectorAll('.prompt-card').forEach((card) => card.onclick = () => selectPrompt(card.dataset.id));
+  document.querySelectorAll('.select-check input').forEach((box) => {
+    box.onclick = (event) => {
+      event.stopPropagation();
+      if (box.checked) state.selectedIds.add(box.dataset.id);
+      else state.selectedIds.delete(box.dataset.id);
+      renderBulkBar();
+    };
+  });
 }
 
 async function selectPrompt(id) {
@@ -211,6 +241,7 @@ function renderDetail() {
       <dt>来源</dt><dd>${p.sourceUrl ? `<a href="${escapeAttr(p.sourceUrl)}" target="_blank">${escapeHtml(p.sourceDomain || p.sourceUrl)}</a>` : escapeHtml(p.sourceDomain || '网页端')}</dd>
       <dt>AI 状态</dt><dd>${escapeHtml(p.aiStatus)} / 置信度 ${p.aiConfidence ?? '-'}</dd>
       <dt>AI 模型</dt><dd>${escapeHtml(p.aiModel || '未记录')}</dd>
+      <dt>使用</dt><dd>${p.usageCount || 0} 次${p.lastUsedAt ? ` / 最近 ${new Date(p.lastUsedAt).toLocaleString()}` : ''}</dd>
       <dt>更新时间</dt><dd>${new Date(p.updatedAt).toLocaleString()}</dd>
     </dl>
     <div class="actions">
@@ -222,6 +253,10 @@ function renderDetail() {
       <button id="reanalyzeBtn" class="secondary">重新分析</button>
       <button id="deleteBtn" class="danger">删除</button>
     </div>
+    <details class="versions">
+      <summary>版本历史</summary>
+      <div id="versionList" class="version-list">加载中...</div>
+    </details>
   `;
   $('favBtn').onclick = toggleFavorite;
   $('copyMdBtn').onclick = () => copyText(p.markdownDoc || `# ${p.title}\n\n## 原始提示词\n${p.content}`, '已复制 Markdown。');
@@ -231,15 +266,73 @@ function renderDetail() {
   $('editBtn').onclick = openEditDialog;
   $('reanalyzeBtn').onclick = reanalyze;
   $('deleteBtn').onclick = deletePrompt;
+  loadVersions(p.id);
 }
 
 function copyText(text, tip) {
   navigator.clipboard.writeText(text || '');
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = tip;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 1400);
+  if (state.selected?.id) api(`/api/prompts/${state.selected.id}/use`, { method: 'POST', body: '{}' }).catch(() => {});
+  toast(tip);
+}
+
+function renderBulkBar() {
+  const count = state.selectedIds.size;
+  $('bulkBar').classList.toggle('hidden', count === 0);
+  $('selectedCount').textContent = count;
+}
+
+function clearSelection(render = true) {
+  state.selectedIds.clear();
+  if (render) {
+    renderPrompts();
+    renderBulkBar();
+  }
+}
+
+async function bulkCategorize() {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  const categoryId = $('bulkCategory').value;
+  const categoryName = $('bulkCategoryName').value.trim();
+  if (!categoryId && !categoryName) return toast('请选择分类或输入新分类名称', true);
+  const data = await api('/api/prompts/batch/categorize', {
+    method: 'POST',
+    body: JSON.stringify({ ids, categoryId, categoryName })
+  });
+  toast(`已手动归类 ${data.updated} 条，AI 不会覆盖这些人工分类。`);
+  $('bulkCategoryName').value = '';
+  clearSelection(false);
+  await loadPrompts();
+}
+
+async function bulkReanalyze() {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  if (!confirm('批量 AI 整理会更新标题、摘要、Markdown 和标签；已人工确认的分类不会被覆盖。继续吗？')) return;
+  const data = await api('/api/prompts/batch/reanalyze', {
+    method: 'POST',
+    body: JSON.stringify({ ids, aiModel: state.defaultAiModel || state.aiModels[0] || '' })
+  });
+  toast(`已整理 ${data.updated} 条。`);
+  clearSelection(false);
+  await loadPrompts();
+}
+
+async function bulkMarkError() {
+  const ids = [...state.selectedIds];
+  if (!ids.length || !confirm(`把选中的 ${ids.length} 条归为错误提示词吗？`)) return;
+  const data = await api('/api/prompts/batch/mark-error', { method: 'POST', body: JSON.stringify({ ids }) });
+  toast(`已归为错误提示词 ${data.updated} 条。`);
+  clearSelection(false);
+  await loadPrompts();
+}
+
+function toast(text, bad = false) {
+  const el = document.createElement('div');
+  el.className = `toast ${bad ? 'bad-toast' : ''}`;
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1800);
 }
 
 function openNewDialog() {
@@ -401,6 +494,85 @@ async function moveReview() {
   state.selected = await api(`/api/prompts/${p.id}/move-review`, { method: 'POST', body: '{}' });
   renderDetail();
   await loadPrompts();
+}
+
+async function loadVersions(promptId) {
+  const box = $('versionList');
+  if (!box) return;
+  try {
+    const versions = await api(`/api/prompts/${promptId}/versions`);
+    if (!versions.length) {
+      box.innerHTML = '<p class="empty small">暂无历史版本。编辑或恢复后会自动记录。</p>';
+      return;
+    }
+    box.innerHTML = versions.map((v) => `
+      <article class="version-row">
+        <div>
+          <strong>${escapeHtml(v.title)}</strong>
+          <p>${new Date(v.createdAt).toLocaleString()} · ${escapeHtml(v.category?.name || '未分类')} · ${escapeHtml(v.changeNote || '历史版本')}</p>
+        </div>
+        <button class="restore-version secondary" data-id="${v.id}" type="button">恢复</button>
+      </article>
+    `).join('');
+    box.querySelectorAll('.restore-version').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('恢复该版本吗？当前内容会先自动备份为一个历史版本。')) return;
+        state.selected = await api(`/api/prompts/${promptId}/versions/${btn.dataset.id}/restore`, { method: 'POST', body: '{}' });
+        toast('版本已恢复。');
+        renderDetail();
+        await loadPrompts();
+      };
+    });
+  } catch (err) {
+    box.innerHTML = `<p class="empty small">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function openCategoryDialog() {
+  $('newCategoryName').value = '';
+  message('categoryMessage', '');
+  renderCategoryManageList();
+  $('categoryDialog').showModal();
+}
+
+function renderCategoryManageList() {
+  $('categoryManageList').innerHTML = state.categories.map((c) => `
+    <article class="category-manage-row">
+      <div>
+        <strong>${escapeHtml(c.name)}</strong>
+        <p>${c.promptCount || 0} 条 · ${c.isSystem ? '系统分类' : '自定义分类'}</p>
+      </div>
+      ${c.isSystem ? '<span class="locked">锁定</span>' : `<button class="rename-cat secondary" data-id="${c.id}" type="button">改名</button><button class="delete-cat danger" data-id="${c.id}" type="button">删除</button>`}
+    </article>
+  `).join('');
+  document.querySelectorAll('.rename-cat').forEach((btn) => {
+    btn.onclick = async () => {
+      const current = state.categories.find((c) => c.id === btn.dataset.id);
+      const name = prompt('新的分类名称', current?.name || '');
+      if (!name) return;
+      await api(`/api/categories/${btn.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+      await loadCategories();
+      message('categoryMessage', '分类已改名。');
+    };
+  });
+  document.querySelectorAll('.delete-cat').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm('删除分类后，该分类下提示词会变为未分类。继续吗？')) return;
+      await api(`/api/categories/${btn.dataset.id}`, { method: 'DELETE' });
+      await loadCategories();
+      await loadPrompts();
+      message('categoryMessage', '分类已删除。');
+    };
+  });
+}
+
+async function addCategory() {
+  const name = $('newCategoryName').value.trim();
+  if (!name) return message('categoryMessage', '请输入分类名称', true);
+  await api('/api/categories', { method: 'POST', body: JSON.stringify({ name }) });
+  $('newCategoryName').value = '';
+  await loadCategories();
+  message('categoryMessage', '分类已新增。');
 }
 
 function escapeHtml(str) {
