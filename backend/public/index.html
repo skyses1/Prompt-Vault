@@ -13,9 +13,9 @@
     <section class="brand-panel">
       <p class="eyebrow">Prompt Vault</p>
       <h1>提示词金库</h1>
-      <p class="lead">把每一次好用的提示词沉淀成团队资产。保存、AI 整理、搜索、收藏，一条龙不掉链子。</p>
+      <p class="lead">把好用提示词、网页摘录和灵感记录沉淀成个人 AI 资料库。保存、AI 整理、搜索、收藏，一条龙不掉链子。</p>
       <div class="feature-grid">
-        <span>通义自动分类</span>
+        <span>通义自动识别</span>
         <span>Chrome 右键采集</span>
         <span>云端同步</span>
         <span>精髓标题</span>
@@ -48,7 +48,11 @@
         <div><strong>提示词金库</strong><small id="userInfo">云端工作台</small></div>
       </div>
       <nav>
-        <button class="nav active" data-filter="all">全部提示词</button>
+        <button class="nav active" data-filter="all">全部内容</button>
+        <button class="nav" data-filter="type_prompt">提示词</button>
+        <button class="nav" data-filter="type_inspiration">灵感记录</button>
+        <button class="nav" data-filter="type_web_excerpt">网页摘录</button>
+        <button class="nav" data-filter="type_review">待审阅资料</button>
         <button class="nav" data-filter="favorite">我的收藏</button>
         <button class="nav" data-filter="need_review">待人工确认</button>
         <button class="nav" data-filter="recent">最近使用</button>
@@ -65,7 +69,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Dashboard</p>
-          <h2>把灵感收进来，让 AI 先帮你归档</h2>
+          <h2>把提示词、网页摘录和灵感都收进来</h2>
         </div>
         <div class="top-actions">
           <button id="importBtn" class="secondary">导入</button>
@@ -120,6 +124,14 @@
         <label>来源标题<input id="sourceTitle" placeholder="例如 ChatGPT" /></label>
         <label>来源 URL<input id="sourceUrl" placeholder="https://..." /></label>
       </div>
+      <label>内容类型
+        <select id="contentType">
+          <option value="prompt">提示词</option>
+          <option value="inspiration">灵感记录</option>
+          <option value="web_excerpt">网页摘录</option>
+          <option value="review">待审阅资料</option>
+        </select>
+      </label>
       <label>AI 整理模型<select id="aiModel"></select></label>
       <label class="check"><input id="autoAnalyze" type="checkbox" checked /> 保存后使用通义/本地规则自动整理</label>
       <div class="dialog-actions">
