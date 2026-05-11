@@ -275,22 +275,36 @@ function renderDetail() {
 function formatRawPromptMarkdown(p) {
   const tags = (p.tags || []).join('、') || '无';
   const source = p.sourceUrl || p.sourceDomain || '网页端';
+  const original = extractOriginalFromMarkdown(p.markdownDoc) || p.content || '';
   return [
     `# ${p.title || '未命名提示词'}`,
     '',
+    `> 类型：${p.contentTypeLabel || '提示词'} / 分类：${p.category?.name || '未分类'}`,
+    '',
+    p.summary ? `## 摘要\n\n${p.summary}\n` : '',
     '## 原始提示词',
     '',
-    p.content || '',
+    original.trim(),
     '',
-    '## 基础信息',
+    '## 复用信息',
     '',
-    `- 类型：${p.contentTypeLabel || '提示词'}`,
-    `- 分类：${p.category?.name || '未分类'}`,
     `- 标签：${tags}`,
     `- 来源：${source}`,
     `- AI 状态：${p.aiStatus || '未记录'}`,
     `- 更新时间：${p.updatedAt ? new Date(p.updatedAt).toLocaleString() : '未记录'}`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
+}
+
+function extractOriginalFromMarkdown(markdown) {
+  const md = String(markdown || '').trim();
+  if (!md) return '';
+  const headings = ['原始提示词', '原文', '原始内容'];
+  for (const heading of headings) {
+    const pattern = new RegExp(`(^|\\n)##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, 'i');
+    const match = md.match(pattern);
+    if (match?.[2]?.trim()) return match[2].trim();
+  }
+  return '';
 }
 
 async function copyText(text, tip) {
