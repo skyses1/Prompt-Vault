@@ -87,6 +87,11 @@ async function searchPrompts(query = '', favoriteOnly = false) {
   return data.items || [];
 }
 
+async function recordPromptUse(promptId) {
+  if (!promptId) return null;
+  return requestJson(`/prompts/${promptId}/use`, { method: 'POST', body: '{}' });
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
   if (info.menuItemId === 'save-selection-to-prompt-vault') {
@@ -125,6 +130,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'PV_GET_SETTINGS') {
       const cfg = await getConfig();
       sendResponse({ success: true, shortcutEnabled: cfg.shortcutEnabled, shortcutKey: cfg.shortcutKey });
+      return;
+    }
+    if (message?.type === 'PV_RECORD_USE') {
+      await recordPromptUse(message.promptId);
+      sendResponse({ success: true });
       return;
     }
   })().catch((error) => sendResponse({ success: false, message: error.message }));
