@@ -65,7 +65,12 @@
           <p class="eyebrow">Dashboard</p>
           <h2>把灵感收进来，让 AI 先帮你归档</h2>
         </div>
-        <button id="newPromptBtn" class="primary">新增提示词</button>
+        <div class="top-actions">
+          <button id="importBtn" class="secondary">导入</button>
+          <button id="exportMdBtn" class="ghost">导出 MD</button>
+          <button id="exportJsonBtn" class="ghost">导出 JSON</button>
+          <button id="newPromptBtn" class="primary">新增提示词</button>
+        </div>
       </header>
 
       <section class="stats">
@@ -106,6 +111,28 @@
         <button type="submit" class="primary">保存</button>
       </div>
       <p id="dialogMessage" class="message"></p>
+    </form>
+  </dialog>
+
+  <dialog id="importDialog">
+    <form id="importForm" method="dialog" class="dialog-card">
+      <h3>导入提示词</h3>
+      <div class="split">
+        <label>导入格式
+          <select id="importFormat">
+            <option value="markdown">Markdown</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
+        <label>AI 整理模型<select id="importAiModel"></select></label>
+      </div>
+      <label class="check"><input id="importAutoAnalyze" type="checkbox" checked /> 导入后自动整理成 Markdown 知识卡片</label>
+      <label>导入内容<textarea id="importContent" rows="10" placeholder="粘贴 Markdown 或 JSON 内容..."></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" id="cancelImportDialog" class="ghost">取消</button>
+        <button type="submit" class="primary">开始导入</button>
+      </div>
+      <p id="importMessage" class="message"></p>
     </form>
   </dialog>
 
