@@ -31,6 +31,45 @@ const DEFAULT_CATEGORIES = [
   '法律合同', '简历求职', '错误提示词', '待人工确认'
 ];
 
+const CONTENT_TYPES = ['prompt', 'inspiration', 'web_excerpt', 'review', 'error'];
+const CONTENT_TYPE_LABELS = {
+  prompt: '提示词',
+  inspiration: '灵感记录',
+  web_excerpt: '网页摘录',
+  review: '待审阅资料',
+  error: '错误内容',
+};
+
+function normalizeContentType(value) {
+  const type = String(value || '').trim();
+  return CONTENT_TYPES.includes(type) ? type : 'prompt';
+}
+
+function looksInvalidContent(content) {
+  const text = String(content || '').trim();
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  const errorSignals = ['traceback', 'stack trace', 'exception', 'syntaxerror', 'typeerror', 'referenceerror', '404', '500', 'undefined', 'null pointer', '报错', '错误日志'];
+  const hasErrorSignal = errorSignals.some((item) => lower.includes(item));
+  const readableChars = (text.match(/[\u4e00-\u9fa5A-Za-z0-9]/g) || []).length;
+  const readableRatio = readableChars / Math.max(1, text.length);
+  return hasErrorSignal || readableRatio < 0.35 || (text.length < 8 && readableRatio < 0.8);
+}
+
+function inferContentTypeFromText(content) {
+  const text = String(content || '').trim();
+  const lower = text.toLowerCase();
+  if (looksInvalidContent(text)) return 'error';
+  const promptSignals = ['你是', '请帮我', '请你', '生成', '输出', '扮演', '要求', 'act as', 'write a', 'create a', 'prompt'];
+  const ideaSignals = ['灵感', '想法', '备忘', '计划', 'todo', 'idea', 'note to self'];
+  const excerptSignals = ['网页摘录', '文章摘录', 'web excerpt', 'excerpt:', 'source:', '原文', '资料'];
+  if (ideaSignals.some((item) => lower.includes(item))) return 'inspiration';
+  if (excerptSignals.some((item) => lower.includes(item))) return 'web_excerpt';
+  if (promptSignals.some((item) => lower.includes(item))) return 'prompt';
+  if (text.length > 120) return 'web_excerpt';
+  return 'review';
+}
+
 function id() {
   return crypto.randomUUID();
 }
@@ -152,6 +191,7 @@ async function initDb() {
       team_id uuid NULL,
       title varchar(255) NOT NULL,
       content text NOT NULL,
+      content_type varchar(40) NOT NULL DEFAULT 'prompt',
       summary text,
       markdown_doc text,
       ai_model varchar(120),
@@ -209,12 +249,14 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS markdown_doc text;
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS ai_model varchar(120);
+    ALTER TABLE prompts ADD COLUMN IF NOT EXISTS content_type varchar(40) NOT NULL DEFAULT 'prompt';
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS usage_count int NOT NULL DEFAULT 0;
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS last_used_at timestamptz NULL;
     ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS markdown_doc text;
   `);
 
   await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_prompts_content_type ON prompts(content_type);
     CREATE INDEX IF NOT EXISTS idx_prompts_last_used_at ON prompts(last_used_at);
     CREATE INDEX IF NOT EXISTS idx_prompts_usage_count ON prompts(usage_count);
   `);
@@ -278,6 +320,7 @@ async function getTagsForPrompt(promptId) {
 function heuristicAnalyze(content) {
   const text = String(content || '');
   const lower = text.toLowerCase();
+  const inferredType = inferContentTypeFromText(text);
   const rules = [
     ['错误提示词', ['error', 'exception', 'traceback', 'stack trace', '404', '500', '报错', '错误', 'undefined', 'null pointer']],
     ['编程开发', ['代码', 'bug', 'api', '函数', '数据库', 'typescript', 'python', 'javascript', 'react', 'sql']],
@@ -302,15 +345,23 @@ function heuristicAnalyze(content) {
       break;
     }
   }
+  if (category === '错误提示词' && !looksInvalidContent(text)) category = '待人工确认';
   const title = makeTitle(text);
   const rawTags = [category, ...text.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,10}/g)?.slice(0, 8) || []];
   const tags = [...new Set(rawTags)].slice(0, 6);
+  let contentType = inferredType;
+  if (category === '错误提示词') contentType = 'error';
+  const typeLabel = CONTENT_TYPE_LABELS[contentType] || '提示词';
+  const md = contentType === 'prompt'
+    ? `# ${title}\n\n## 用途\n用于${category}场景的提示词，可帮助用户快速复用和优化工作流程。\n\n## 适用场景\n- ${category}\n- AI 辅助创作\n- 日常工作沉淀\n\n## 原始提示词\n${text}\n\n## 标签\n${tags.join('、')}\n\n## 整理方式\n当前由本地规则自动整理。配置通义 API Key 后，可升级为通义自动生成更完整的 Markdown 文档。`
+    : `# ${title}\n\n## 内容类型\n${typeLabel}\n\n## 核心摘要\n${text.slice(0, 180)}${text.length > 180 ? '...' : ''}\n\n## 关键信息\n- 可作为后续查看、审阅和整理的资料\n- 可继续人工补充分类、标签和备注\n\n## 原文\n${text}\n\n## 标签\n${tags.join('、')}`;
   return {
     title,
     category,
+    contentType,
     tags,
-    summary: `用于${category}场景的提示词，可在保存后继续人工优化分类、标题和标签。`,
-    markdownDoc: `# ${title}\n\n## 用途\n用于${category}场景的提示词，可帮助用户快速复用和优化工作流程。\n\n## 适用场景\n- ${category}\n- AI 辅助创作\n- 日常工作沉淀\n\n## 原始提示词\n${text}\n\n## 标签\n${tags.join('、')}\n\n## 整理方式\n当前由本地规则自动整理。配置通义 API Key 后，可升级为通义自动生成更完整的 Markdown 文档。`,
+    summary: contentType === 'prompt' ? `用于${category}场景的提示词，可在保存后继续人工优化分类、标题和标签。` : `这是一条${typeLabel}，已整理为便于后续查看和审阅的资料卡片。`,
+    markdownDoc: md,
     confidence,
   };
 }
@@ -334,7 +385,16 @@ function pickAiModel(model) {
 async function analyzePrompt(content, model) {
   const selectedModel = pickAiModel(model);
   if (!TONGYI_API_KEY) return heuristicAnalyze(content);
-  const system = `你是一个提示词知识库整理助手。请根据用户提供的提示词内容，生成结构化 JSON。要求：title 是提示词的精髓标题，限制 6 到 20 个中文字符；category 从给定分类中选择最合适的一个；tags 生成 3 到 8 个；summary 用 1 到 2 句话说明用途；markdownDoc 生成一份 Markdown 知识卡片，包含 # 标题、## 用途、## 适用场景、## 原始提示词、## 使用方法、## 标签、## 来源说明；confidence 返回 0 到 1。如果内容明显不是可复用提示词，例如误选文本、乱码、错误日志、网页碎片、无意义片段、异常报错内容，category 使用“错误提示词”；如果只是无法判断分类，category 使用“待人工确认”，confidence 低于 0.5。只返回 JSON。分类：${DEFAULT_CATEGORIES.join('、')}`;
+  const system = `你是一个个人知识库整理助手。请根据用户提供的内容，生成结构化 JSON。要求：
+1. title 是内容精髓标题，限制 6 到 24 个中文字符。
+2. contentType 必须从 prompt、inspiration、web_excerpt、review、error 中选择：prompt=可复用提示词；inspiration=想法/备忘/灵感；web_excerpt=网页摘录/文章段落/资料；review=需要后续审阅但暂不确定价值的资料；error=误选文本、乱码、错误日志、异常报错或无意义片段。
+正常网页摘录、文章段落、学习资料、产品资料、待审阅文字，即使不是提示词，也不能归为 error，应优先归为 web_excerpt 或 review。
+3. category 从给定分类中选择最合适的一个；如果 contentType 是 error，category 使用“错误提示词”；如果无法判断，category 使用“待人工确认”。
+4. tags 生成 3 到 8 个。
+5. summary 用 1 到 2 句话说明内容价值或用途。
+6. markdownDoc 生成一份 Markdown 知识卡片。如果 contentType=prompt，包含 # 标题、## 用途、## 适用场景、## 原始提示词、## 使用方法、## 标签、## 来源说明。如果不是提示词，包含 # 标题、## 内容类型、## 核心摘要、## 关键信息、## 可用于、## 原文、## 后续审阅建议、## 标签。
+7. confidence 返回 0 到 1。
+只返回 JSON。分类：${DEFAULT_CATEGORIES.join('、')}`;
   const fallbackModels = ['qwen3.6-plus'];
   const modelsToTry = [...new Set([selectedModel, ...TONGYI_MODELS.map((item) => MODEL_ALIASES[item] || item), ...fallbackModels].filter(Boolean))];
   let response;
@@ -366,8 +426,13 @@ async function analyzePrompt(content, model) {
   }
   if (!response) throw lastError || new Error('AI model request failed');
   const parsed = extractJson(response.data.choices?.[0]?.message?.content || '{}');
+  let contentType = normalizeContentType(parsed.contentType || parsed.content_type);
+  if (contentType === 'error' && !looksInvalidContent(content)) contentType = 'web_excerpt';
+  const inferredType = inferContentTypeFromText(content);
+  if (contentType === 'prompt' && inferredType !== 'prompt' && inferredType !== 'error') contentType = inferredType;
   return {
     title: String(parsed.title || makeTitle(content)).slice(0, 80),
+    contentType,
     category: DEFAULT_CATEGORIES.includes(parsed.category) ? parsed.category : '待人工确认',
     tags: Array.isArray(parsed.tags) ? parsed.tags.map(String).slice(0, 8) : [],
     summary: String(parsed.summary || '').slice(0, 500),
@@ -382,11 +447,13 @@ async function applyAnalysis(promptId, userId, content, model) {
   try {
     const analysis = await analyzePrompt(content, selectedModel);
     const confidence = Number(analysis.confidence || 0);
-    const categoryName = confidence < 0.5 ? '待人工确认' : analysis.category;
+    const contentType = normalizeContentType(confidence < 0.5 ? 'review' : analysis.contentType);
+    const categoryName = contentType === 'error' ? '错误提示词' : (confidence < 0.5 ? '待人工确认' : analysis.category);
     const category = await findCategoryByName(categoryName);
     await pool.query(
       `UPDATE prompts
        SET title=$1,
+           content_type=CASE WHEN is_manual_confirmed THEN content_type ELSE $10 END,
            summary=$2,
            markdown_doc=$3,
            category_id=CASE WHEN is_manual_confirmed THEN category_id ELSE $4 END,
@@ -395,7 +462,7 @@ async function applyAnalysis(promptId, userId, content, model) {
            ai_model=$7,
            updated_at=now()
        WHERE id=$8 AND user_id=$9`,
-      [analysis.title || makeTitle(content), analysis.summary || '', analysis.markdownDoc || '', category.id, confidence < 0.5 ? 'need_review' : 'completed', confidence, analysis.usedModel || selectedModel, promptId, userId]
+      [analysis.title || makeTitle(content), analysis.summary || '', analysis.markdownDoc || '', category.id, confidence < 0.5 ? 'need_review' : 'completed', confidence, analysis.usedModel || selectedModel, promptId, userId, contentType]
     );
     await setPromptTags(promptId, userId, analysis.tags || []);
   } catch (error) {
@@ -534,6 +601,9 @@ app.get('/api/prompts', authRequired, asyncRoute(async (req, res) => {
       [req.user.sub]
     );
     const ranked = result.rows
+      .filter((row) => !req.query.contentType || normalizeContentType(row.content_type) === normalizeContentType(req.query.contentType))
+      .filter((row) => req.query.favorite !== 'true' || row.is_favorite)
+      .filter((row) => !req.query.aiStatus || row.ai_status === req.query.aiStatus)
       .map((row) => {
         const haystack = `${row.title || ''}\n${row.summary || ''}\n${row.content || ''}\n${row.markdown_doc || ''}\n${(row.tags || []).join(' ')}`;
         const score = Math.max(diceSimilarity(q, haystack), haystack.toLowerCase().includes(q.toLowerCase()) ? 0.5 : 0);
@@ -553,6 +623,7 @@ app.get('/api/prompts', authRequired, asyncRoute(async (req, res) => {
   }
   if (req.query.categoryId) { params.push(req.query.categoryId); where.push(`p.category_id=$${params.length}`); }
   if (req.query.sourceDomain) { params.push(req.query.sourceDomain); where.push(`p.source_domain=$${params.length}`); }
+  if (req.query.contentType) { params.push(normalizeContentType(req.query.contentType)); where.push(`p.content_type=$${params.length}`); }
   if (req.query.favorite === 'true') where.push('p.is_favorite=true');
   if (req.query.aiStatus) { params.push(req.query.aiStatus); where.push(`p.ai_status=$${params.length}`); }
   if (req.query.sort === 'recent_used') where.push('p.last_used_at IS NOT NULL');
@@ -585,6 +656,8 @@ function promptRow(r) {
     id: r.id,
     title: r.title,
     content: r.content,
+    contentType: normalizeContentType(r.content_type),
+    contentTypeLabel: CONTENT_TYPE_LABELS[normalizeContentType(r.content_type)],
     summary: r.summary,
     markdownDoc: r.markdown_doc,
     category: r.category_id ? { id: r.category_id, name: r.category_name } : null,
@@ -634,6 +707,7 @@ function promptsToMarkdown(prompts) {
     const lines = [
       `# ${p.title}`,
       '',
+      `- 类型：${p.contentTypeLabel || '提示词'}`,
       `- 分类：${p.category?.name || '未分类'}`,
       `- 标签：${(p.tags || []).join('、') || '无'}`,
       `- 来源：${p.sourceUrl || p.sourceDomain || '网页端'}`,
@@ -659,6 +733,7 @@ function parseImportContent(format, content) {
       title: item.title ? String(item.title).trim() : '',
       summary: item.summary ? String(item.summary).trim() : '',
       markdownDoc: item.markdownDoc || item.markdown_doc || '',
+      contentType: item.contentType || item.content_type || '',
       categoryName: item.categoryName || item.category_name || item.category?.name || '',
       sourceTitle: item.sourceTitle || item.source_title || 'JSON 导入',
       sourceUrl: item.sourceUrl || item.source_url || '',
@@ -757,23 +832,25 @@ async function createPrompt(userId, body) {
   const promptId = id();
   const sourceUrl = body.sourceUrl || null;
   const sourceDomain = body.sourceDomain || normalizeDomain(sourceUrl);
+  const contentType = normalizeContentType(body.contentType);
   const result = await pool.query(
-    `INSERT INTO prompts (id, user_id, title, content, source_title, source_url, source_domain, ai_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [promptId, userId, String(body.title || '').trim() || makeTitle(content), content, body.sourceTitle || null, sourceUrl, sourceDomain, body.autoAnalyze === false ? 'completed' : 'pending']
+    `INSERT INTO prompts (id, user_id, title, content, content_type, source_title, source_url, source_domain, ai_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [promptId, userId, String(body.title || '').trim() || makeTitle(content), content, contentType, body.sourceTitle || null, sourceUrl, sourceDomain, body.autoAnalyze === false ? 'completed' : 'pending']
   );
   if (body.autoAnalyze !== false) {
     await applyAnalysis(promptId, userId, content, body.aiModel);
   } else {
     const category = body.categoryName ? await findCategoryByName(String(body.categoryName).trim()) : null;
     await pool.query(
-      `UPDATE prompts SET title=$1, summary=$2, markdown_doc=$3, category_id=COALESCE($4, category_id), updated_at=now()
-       WHERE id=$5 AND user_id=$6`,
+      `UPDATE prompts SET title=$1, summary=$2, markdown_doc=$3, category_id=COALESCE($4, category_id), content_type=$5, updated_at=now()
+       WHERE id=$6 AND user_id=$7`,
       [
         String(body.title || '').trim() || makeTitle(content),
         body.summary ? String(body.summary).trim() : null,
         body.markdownDoc ? String(body.markdownDoc).trim() : null,
         category?.id || null,
+        contentType,
         promptId,
         userId
       ]
@@ -815,6 +892,7 @@ app.post('/api/import', authRequired, asyncRoute(async (req, res) => {
         forceSave: Boolean(req.body.forceSave),
         title: item.title,
         summary: item.summary,
+        contentType: item.contentType,
         categoryName: item.categoryName,
         tagNames: item.tagNames,
         markdownDoc: item.markdownDoc,
@@ -861,7 +939,7 @@ app.post('/api/prompts/batch/categorize', authRequired, asyncRoute(async (req, r
   if (!category.rows[0]) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '分类不存在' } });
   const result = await pool.query(
     `UPDATE prompts
-     SET category_id=$1, is_manual_confirmed=true, ai_status='completed', updated_at=now()
+     SET category_id=$1, content_type='error', is_manual_confirmed=true, ai_status='completed', updated_at=now()
      WHERE user_id=$2 AND deleted_at IS NULL AND id=ANY($3::uuid[])
      RETURNING id`,
     [categoryId, req.user.sub, ids]
@@ -906,8 +984,8 @@ app.patch('/api/prompts/:id', authRequired, asyncRoute(async (req, res) => {
     [id(), old.id, old.title, old.content, old.summary, old.markdown_doc, old.category_id, req.user.sub, req.body.changeNote || null]
   );
   await pool.query(
-    `UPDATE prompts SET title=$1, content=$2, summary=$3, markdown_doc=$4, category_id=$5, is_manual_confirmed=$6, updated_at=now() WHERE id=$7 AND user_id=$8`,
-    [req.body.title || old.title, req.body.content || old.content, req.body.summary ?? old.summary, req.body.markdownDoc ?? old.markdown_doc, req.body.categoryId || old.category_id, Boolean(req.body.isManualConfirmed ?? old.is_manual_confirmed), req.params.id, req.user.sub]
+    `UPDATE prompts SET title=$1, content=$2, summary=$3, markdown_doc=$4, category_id=$5, is_manual_confirmed=$6, content_type=$7, updated_at=now() WHERE id=$8 AND user_id=$9`,
+    [req.body.title || old.title, req.body.content || old.content, req.body.summary ?? old.summary, req.body.markdownDoc ?? old.markdown_doc, req.body.categoryId || old.category_id, Boolean(req.body.isManualConfirmed ?? old.is_manual_confirmed), normalizeContentType(req.body.contentType || old.content_type), req.params.id, req.user.sub]
   );
   if (Array.isArray(req.body.tagNames)) await setPromptTags(req.params.id, req.user.sub, req.body.tagNames);
   const detail = await pool.query('SELECT p.*, c.name AS category_name FROM prompts p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=$1', [req.params.id]);
@@ -939,7 +1017,7 @@ app.post('/api/prompts/:id/use', authRequired, asyncRoute(async (req, res) => {
 app.post('/api/prompts/:id/mark-error', authRequired, asyncRoute(async (req, res) => {
   const category = await findCategoryByName('错误提示词');
   const result = await pool.query(
-    `UPDATE prompts SET category_id=$1, ai_status='completed', is_manual_confirmed=true, updated_at=now()
+    `UPDATE prompts SET category_id=$1, content_type='error', ai_status='completed', is_manual_confirmed=true, updated_at=now()
      WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING id`,
     [category.id, req.params.id, req.user.sub]
   );
@@ -951,7 +1029,7 @@ app.post('/api/prompts/:id/mark-error', authRequired, asyncRoute(async (req, res
 app.post('/api/prompts/:id/move-review', authRequired, asyncRoute(async (req, res) => {
   const category = await findCategoryByName('待人工确认');
   const result = await pool.query(
-    `UPDATE prompts SET category_id=$1, ai_status='need_review', is_manual_confirmed=false, updated_at=now()
+    `UPDATE prompts SET category_id=$1, content_type='review', ai_status='need_review', is_manual_confirmed=false, updated_at=now()
      WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING id`,
     [category.id, req.params.id, req.user.sub]
   );
