@@ -570,7 +570,9 @@ function parseImportContent(format, content) {
       tagNames: Array.isArray(item.tags) ? item.tags.map(String) : [],
     })).filter((item) => item.content);
   }
-  const sections = text.split(/\n(?=#\s+)/g).map((section) => section.trim()).filter(Boolean);
+  const sections = (/\n---+\s*(\n|$)/.test(text) ? text.split(/\n---+\s*(?:\n|$)/g) : text.split(/\n(?=#\s+)/g))
+    .map((section) => section.trim())
+    .filter(Boolean);
   if (sections.length) {
     return sections.map((section) => {
       const titleMatch = section.match(/^#\s+(.+)$/m);
