@@ -246,12 +246,14 @@ function renderPrompts() {
       if (text === null) return;
       await navigator.clipboard.writeText(text);
       const ok = await insertIntoPage(text);
+      requestJson(`/prompts/${p.id}/use`, { method: 'POST', body: '{}' }).catch(() => {});
       msg(ok ? '已复制并插入当前输入框。' : '未找到输入框，已复制到剪贴板。', !ok);
     };
     el.querySelector('.copy').onclick = async () => {
       const text = fillTemplateVariables(p.content || '');
       if (text === null) return;
       await navigator.clipboard.writeText(text);
+      requestJson(`/prompts/${p.id}/use`, { method: 'POST', body: '{}' }).catch(() => {});
       msg('已复制到剪贴板。');
     };
   });
