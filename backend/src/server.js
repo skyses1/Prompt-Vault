@@ -509,6 +509,82 @@ function promptRow(r) {
   };
 }
 
+async function getPromptWithTagsForUser(userId, promptId) {
+  const result = await pool.query(
+    `SELECT p.*, c.name AS category_name FROM prompts p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.user_id=$2 AND p.deleted_at IS NULL`,
+    [promptId, userId]
+  );
+  if (!result.rows[0]) return null;
+  return promptRow({ ...result.rows[0], tags: await getTagsForPrompt(promptId) });
+}
+
+async function listPromptsForExport(userId) {
+  const result = await pool.query(
+    `SELECT p.*, c.name AS category_name,
+      COALESCE(array_agg(t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tags
+     FROM prompts p
+     LEFT JOIN categories c ON c.id=p.category_id
+     LEFT JOIN prompt_tags pt ON pt.prompt_id=p.id
+     LEFT JOIN tags t ON t.id=pt.tag_id
+     WHERE p.user_id=$1 AND p.deleted_at IS NULL
+     GROUP BY p.id, c.name
+     ORDER BY p.created_at DESC`,
+    [userId]
+  );
+  return result.rows.map(promptRow);
+}
+
+function promptsToMarkdown(prompts) {
+  return prompts.map((p) => {
+    const lines = [
+      `# ${p.title}`,
+      '',
+      `- 分类：${p.category?.name || '未分类'}`,
+      `- 标签：${(p.tags || []).join('、') || '无'}`,
+      `- 来源：${p.sourceUrl || p.sourceDomain || '网页端'}`,
+      `- 创建时间：${p.createdAt}`,
+      '',
+      p.markdownDoc || `## 原始提示词\n${p.content}`,
+      '',
+      '---',
+      ''
+    ];
+    return lines.join('\n');
+  }).join('\n');
+}
+
+function parseImportContent(format, content) {
+  const text = String(content || '').trim();
+  if (!text) return [];
+  if (format === 'json') {
+    const parsed = JSON.parse(text);
+    const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.prompts) ? parsed.prompts : []);
+    return arr.map((item) => ({
+      content: String(item.content || item.prompt || item.text || '').trim(),
+      title: item.title ? String(item.title).trim() : '',
+      summary: item.summary ? String(item.summary).trim() : '',
+      markdownDoc: item.markdownDoc || item.markdown_doc || '',
+      categoryName: item.categoryName || item.category_name || item.category?.name || '',
+      sourceTitle: item.sourceTitle || item.source_title || 'JSON 导入',
+      sourceUrl: item.sourceUrl || item.source_url || '',
+      tagNames: Array.isArray(item.tags) ? item.tags.map(String) : [],
+    })).filter((item) => item.content);
+  }
+  const sections = text.split(/\n(?=#\s+)/g).map((section) => section.trim()).filter(Boolean);
+  if (sections.length) {
+    return sections.map((section) => {
+      const titleMatch = section.match(/^#\s+(.+)$/m);
+      const cleaned = section.replace(/^#\s+.+$/m, '').trim();
+      return {
+        title: titleMatch ? titleMatch[1].trim() : '',
+        content: cleaned || section,
+        sourceTitle: 'Markdown 导入',
+      };
+    }).filter((item) => item.content);
+  }
+  return [{ content: text, sourceTitle: 'Markdown 导入' }];
+}
+
 app.get('/api/prompts/:id', authRequired, asyncRoute(async (req, res) => {
   const result = await pool.query(
     `SELECT p.*, c.name AS category_name FROM prompts p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.user_id=$2 AND p.deleted_at IS NULL`,
@@ -538,15 +614,79 @@ async function createPrompt(userId, body) {
   const result = await pool.query(
     `INSERT INTO prompts (id, user_id, title, content, source_title, source_url, source_domain, ai_status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [promptId, userId, makeTitle(content), content, body.sourceTitle || null, sourceUrl, sourceDomain, body.autoAnalyze === false ? 'completed' : 'pending']
+    [promptId, userId, String(body.title || '').trim() || makeTitle(content), content, body.sourceTitle || null, sourceUrl, sourceDomain, body.autoAnalyze === false ? 'completed' : 'pending']
   );
-  if (body.autoAnalyze !== false) await applyAnalysis(promptId, userId, content, body.aiModel);
+  if (body.autoAnalyze !== false) {
+    await applyAnalysis(promptId, userId, content, body.aiModel);
+  } else {
+    const category = body.categoryName ? await findCategoryByName(String(body.categoryName).trim()) : null;
+    await pool.query(
+      `UPDATE prompts SET title=$1, summary=$2, markdown_doc=$3, category_id=COALESCE($4, category_id), updated_at=now()
+       WHERE id=$5 AND user_id=$6`,
+      [
+        String(body.title || '').trim() || makeTitle(content),
+        body.summary ? String(body.summary).trim() : null,
+        body.markdownDoc ? String(body.markdownDoc).trim() : null,
+        category?.id || null,
+        promptId,
+        userId
+      ]
+    );
+    if (Array.isArray(body.tagNames)) await setPromptTags(promptId, userId, body.tagNames);
+  }
   const detail = await pool.query(
     `SELECT p.*, c.name AS category_name FROM prompts p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id=$1`,
     [promptId]
   );
   return promptRow({ ...detail.rows[0], tags: await getTagsForPrompt(promptId) });
 }
+
+app.get('/api/export', authRequired, asyncRoute(async (req, res) => {
+  const format = String(req.query.format || 'json').toLowerCase();
+  const prompts = await listPromptsForExport(req.user.sub);
+  if (format === 'markdown' || format === 'md') {
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="prompt-vault-export.md"');
+    return res.send(promptsToMarkdown(prompts));
+  }
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="prompt-vault-export.json"');
+  return res.json({ success: true, data: { exportedAt: new Date().toISOString(), prompts } });
+}));
+
+app.post('/api/import', authRequired, asyncRoute(async (req, res) => {
+  const format = String(req.body.format || 'markdown').toLowerCase();
+  const autoAnalyze = req.body.autoAnalyze !== false;
+  const items = parseImportContent(format, req.body.content).slice(0, 80);
+  if (!items.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '没有可导入的内容' } });
+  const summary = { imported: 0, skipped: 0, failed: 0, items: [], errors: [] };
+  for (const item of items) {
+    try {
+      const prompt = await createPrompt(req.user.sub, {
+        ...item,
+        autoAnalyze,
+        aiModel: req.body.aiModel,
+        forceSave: Boolean(req.body.forceSave),
+        title: item.title,
+        summary: item.summary,
+        categoryName: item.categoryName,
+        tagNames: item.tagNames,
+        markdownDoc: item.markdownDoc,
+      });
+      summary.imported++;
+      summary.items.push(prompt);
+    } catch (error) {
+      if (error.code === 'DUPLICATE_PROMPT') {
+        summary.skipped++;
+        summary.errors.push({ title: item.title || makeTitle(item.content), message: error.message, code: error.code, matches: error.details?.matches || [] });
+      } else {
+        summary.failed++;
+        summary.errors.push({ title: item.title || makeTitle(item.content), message: error.message, code: error.code || 'IMPORT_FAILED' });
+      }
+    }
+  }
+  res.json({ success: true, data: summary });
+}));
 
 app.post('/api/prompts', authRequired, asyncRoute(async (req, res) => {
   res.json({ success: true, data: await createPrompt(req.user.sub, req.body) });
@@ -583,6 +723,30 @@ app.post('/api/prompts/:id/favorite', authRequired, asyncRoute(async (req, res) 
   const result = await pool.query('UPDATE prompts SET is_favorite=$1, updated_at=now() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING is_favorite', [Boolean(req.body.isFavorite), req.params.id, req.user.sub]);
   if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
   res.json({ success: true, data: { isFavorite: result.rows[0].is_favorite } });
+}));
+
+app.post('/api/prompts/:id/mark-error', authRequired, asyncRoute(async (req, res) => {
+  const category = await findCategoryByName('错误提示词');
+  const result = await pool.query(
+    `UPDATE prompts SET category_id=$1, ai_status='completed', is_manual_confirmed=true, updated_at=now()
+     WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING id`,
+    [category.id, req.params.id, req.user.sub]
+  );
+  if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
+  const prompt = await getPromptWithTagsForUser(req.user.sub, req.params.id);
+  res.json({ success: true, data: prompt });
+}));
+
+app.post('/api/prompts/:id/move-review', authRequired, asyncRoute(async (req, res) => {
+  const category = await findCategoryByName('待人工确认');
+  const result = await pool.query(
+    `UPDATE prompts SET category_id=$1, ai_status='need_review', is_manual_confirmed=false, updated_at=now()
+     WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING id`,
+    [category.id, req.params.id, req.user.sub]
+  );
+  if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
+  const prompt = await getPromptWithTagsForUser(req.user.sub, req.params.id);
+  res.json({ success: true, data: prompt });
 }));
 
 app.post('/api/prompts/:id/confirm', authRequired, asyncRoute(async (req, res) => {
