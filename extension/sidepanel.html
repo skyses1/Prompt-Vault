@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>提示词金库侧边栏</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="sidepanel">
+  <main>
+    <header>
+      <div>
+        <h1>提示词金库</h1>
+        <p id="accountLine">未登录</p>
+      </div>
+      <button id="logoutBtn" class="mini hidden" type="button">退出</button>
+    </header>
+
+    <section id="loginBox" class="panel">
+      <label>API<input id="apiBaseUrl" placeholder="http://10.10.10.68:8080/api" /></label>
+      <label>邮箱<input id="email" type="email" /></label>
+      <label>密码<input id="password" type="password" /></label>
+      <button id="loginBtn" type="button">登录插件</button>
+      <p id="loginMsg" class="msg-inline"></p>
+    </section>
+
+    <section id="consoleBox" class="panel hidden">
+      <div class="quick-grid">
+        <button id="saveSelectionBtn" type="button">保存选中</button>
+        <button id="openWebBtn" type="button" class="light">打开网页</button>
+      </div>
+      <button id="openSidePanelBtn" type="button" class="light">当前已是侧边栏</button>
+      <button id="openPanelBtn" type="button" class="light">在网页中打开搜索框</button>
+      <label>AI 整理模型<select id="aiModel"></select></label>
+      <div class="setting-row">
+        <label class="check"><input id="favoriteOnly" type="checkbox" /> 只看收藏</label>
+        <label class="check"><input id="shortcutEnabled" type="checkbox" /> 启用快捷键</label>
+      </div>
+      <label>快捷键预设<select id="shortcutPreset"></select></label>
+      <label id="customShortcutWrap" class="hidden">自定义快捷键<input id="customShortcut" placeholder="例如 Ctrl+Alt+P" /></label>
+      <input id="search" placeholder="搜索全部提示词..." />
+      <div id="favorites" class="favorites"></div>
+      <details>
+        <summary>手动粘贴保存</summary>
+        <textarea id="manualContent" rows="4" placeholder="粘贴提示词后保存..."></textarea>
+        <button id="manualSaveBtn" type="button">保存粘贴内容</button>
+      </details>
+      <p id="msg" class="msg-inline"></p>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
