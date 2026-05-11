@@ -245,8 +245,8 @@ function renderDetail() {
       <dt>更新时间</dt><dd>${new Date(p.updatedAt).toLocaleString()}</dd>
     </dl>
     <div class="actions">
-      <button id="copyMdBtn" class="secondary">复制 Markdown</button>
       <button id="copyRawBtn" class="secondary">复制原文</button>
+      <button id="copyMdBtn" class="secondary">复制 Markdown</button>
       <button id="markErrorBtn" class="secondary">归为错误</button>
       <button id="moveReviewBtn" class="secondary">待人工确认</button>
       <button id="editBtn" class="secondary">编辑</button>
@@ -260,13 +260,33 @@ function renderDetail() {
   `;
   $('favBtn').onclick = toggleFavorite;
   $('copyMdBtn').onclick = () => copyText(p.markdownDoc || `# ${p.title}\n\n## 原始提示词\n${p.content}`, '已复制 Markdown。');
-  $('copyRawBtn').onclick = () => copyText(p.content, '已复制原始提示词。');
+  $('copyRawBtn').onclick = () => copyText(formatRawPromptMarkdown(p), '已复制 Markdown 格式原文。');
   $('markErrorBtn').onclick = markError;
   $('moveReviewBtn').onclick = moveReview;
   $('editBtn').onclick = openEditDialog;
   $('reanalyzeBtn').onclick = reanalyze;
   $('deleteBtn').onclick = deletePrompt;
   loadVersions(p.id);
+}
+
+function formatRawPromptMarkdown(p) {
+  const tags = (p.tags || []).join('、') || '无';
+  const source = p.sourceUrl || p.sourceDomain || '网页端';
+  return [
+    `# ${p.title || '未命名提示词'}`,
+    '',
+    '## 原始提示词',
+    '',
+    p.content || '',
+    '',
+    '## 基础信息',
+    '',
+    `- 分类：${p.category?.name || '未分类'}`,
+    `- 标签：${tags}`,
+    `- 来源：${source}`,
+    `- AI 状态：${p.aiStatus || '未记录'}`,
+    `- 更新时间：${p.updatedAt ? new Date(p.updatedAt).toLocaleString() : '未记录'}`,
+  ].join('\n');
 }
 
 async function copyText(text, tip) {
