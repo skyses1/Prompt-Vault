@@ -10,6 +10,9 @@
 
 chrome.runtime.onInstalled.addListener(async () => {
   rebuildContextMenus();
+  try {
+    if (chrome.sidePanel?.setPanelBehavior) await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  } catch (_) {}
   const cfg = await chrome.storage.local.get(['shortcutEnabled', 'shortcutKey']);
   if (cfg.shortcutEnabled === undefined) await chrome.storage.local.set({ shortcutEnabled: true });
   if (!cfg.shortcutKey) await chrome.storage.local.set({ shortcutKey: 'Ctrl+Shift+K' });
