@@ -65,8 +65,13 @@ function bindEvents() {
   $('registerForm').onsubmit = register;
   $('logoutBtn').onclick = logout;
   $('newPromptBtn').onclick = openNewDialog;
+  $('importBtn').onclick = openImportDialog;
+  $('exportMdBtn').onclick = () => exportPrompts('markdown');
+  $('exportJsonBtn').onclick = () => exportPrompts('json');
   $('cancelDialog').onclick = () => $('promptDialog').close();
+  $('cancelImportDialog').onclick = () => $('importDialog').close();
   $('promptForm').onsubmit = savePrompt;
+  $('importForm').onsubmit = importPrompts;
   $('searchBtn').onclick = () => { state.q = $('searchInput').value.trim(); loadPrompts(); };
   $('clearBtn').onclick = () => { $('searchInput').value = ''; state.q = ''; state.filter = 'all'; state.categoryId = ''; setNavActive(); loadPrompts(); };
   $('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('searchBtn').click(); });
@@ -128,6 +133,11 @@ async function loadAiModels() {
   if (select) {
     select.innerHTML = state.aiModels.map((model) => `<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join('');
     select.value = state.defaultAiModel;
+  }
+  const importSelect = $('importAiModel');
+  if (importSelect) {
+    importSelect.innerHTML = state.aiModels.map((model) => `<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join('');
+    importSelect.value = state.defaultAiModel;
   }
 }
 
@@ -204,17 +214,32 @@ function renderDetail() {
       <dt>更新时间</dt><dd>${new Date(p.updatedAt).toLocaleString()}</dd>
     </dl>
     <div class="actions">
-      <button id="copyBtn" class="secondary">复制</button>
+      <button id="copyMdBtn" class="secondary">复制 Markdown</button>
+      <button id="copyRawBtn" class="secondary">复制原文</button>
+      <button id="markErrorBtn" class="secondary">归为错误</button>
+      <button id="moveReviewBtn" class="secondary">待人工确认</button>
       <button id="editBtn" class="secondary">编辑</button>
       <button id="reanalyzeBtn" class="secondary">重新分析</button>
       <button id="deleteBtn" class="danger">删除</button>
     </div>
   `;
   $('favBtn').onclick = toggleFavorite;
-  $('copyBtn').onclick = () => navigator.clipboard.writeText(p.content);
+  $('copyMdBtn').onclick = () => copyText(p.markdownDoc || `# ${p.title}\n\n## 原始提示词\n${p.content}`, '已复制 Markdown。');
+  $('copyRawBtn').onclick = () => copyText(p.content, '已复制原始提示词。');
+  $('markErrorBtn').onclick = markError;
+  $('moveReviewBtn').onclick = moveReview;
   $('editBtn').onclick = openEditDialog;
   $('reanalyzeBtn').onclick = reanalyze;
   $('deleteBtn').onclick = deletePrompt;
+}
+
+function copyText(text, tip) {
+  navigator.clipboard.writeText(text || '');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = tip;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 1400);
 }
 
 function openNewDialog() {
@@ -242,6 +267,58 @@ function openEditDialog() {
   $('aiModel').value = p.aiModel || state.defaultAiModel || state.aiModels[0] || '';
   message('dialogMessage', '');
   $('promptDialog').showModal();
+}
+
+function openImportDialog() {
+  $('importContent').value = '';
+  $('importAutoAnalyze').checked = true;
+  $('importFormat').value = 'markdown';
+  $('importAiModel').value = state.defaultAiModel || state.aiModels[0] || '';
+  message('importMessage', '');
+  $('importDialog').showModal();
+}
+
+async function exportPrompts(format) {
+  const res = await fetch(`/api/export?format=${encodeURIComponent(format)}`, {
+    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+  });
+  if (!res.ok) throw new Error('导出失败');
+  const blob = await res.blob();
+  const ext = format === 'json' ? 'json' : 'md';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `prompt-vault-export-${new Date().toISOString().slice(0, 10)}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importPrompts(e) {
+  e.preventDefault();
+  const submit = $('importForm').querySelector('button[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = '导入中...';
+  try {
+    const data = await api('/api/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        format: $('importFormat').value,
+        content: $('importContent').value,
+        autoAnalyze: $('importAutoAnalyze').checked,
+        aiModel: $('importAiModel').value,
+      })
+    });
+    message('importMessage', `导入 ${data.imported} 条，跳过重复 ${data.skipped} 条，失败 ${data.failed} 条。`, data.failed > 0);
+    await loadPrompts();
+    if (data.items?.[0]) await selectPrompt(data.items[0].id);
+  } catch (err) {
+    message('importMessage', err.message, true);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = '开始导入';
+  }
 }
 
 async function savePrompt(e) {
@@ -307,6 +384,22 @@ async function deletePrompt() {
   await api(`/api/prompts/${p.id}`, { method: 'DELETE' });
   state.selected = null;
   $('detailCard').innerHTML = '<p class="empty">已删除。选择其他提示词查看详情。</p>';
+  await loadPrompts();
+}
+
+async function markError() {
+  const p = state.selected;
+  if (!p || !confirm('把这个提示词归类为“错误提示词”吗？')) return;
+  state.selected = await api(`/api/prompts/${p.id}/mark-error`, { method: 'POST', body: '{}' });
+  renderDetail();
+  await loadPrompts();
+}
+
+async function moveReview() {
+  const p = state.selected;
+  if (!p) return;
+  state.selected = await api(`/api/prompts/${p.id}/move-review`, { method: 'POST', body: '{}' });
+  renderDetail();
   await loadPrompts();
 }
 
