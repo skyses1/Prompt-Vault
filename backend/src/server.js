@@ -123,6 +123,7 @@ async function findSimilarPrompts(userId, content) {
 
 async function initDb() {
   await pool.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+  await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id uuid PRIMARY KEY,
@@ -162,6 +163,8 @@ async function initDb() {
       ai_confidence numeric(4,3),
       is_favorite boolean NOT NULL DEFAULT false,
       is_manual_confirmed boolean NOT NULL DEFAULT false,
+      usage_count int NOT NULL DEFAULT 0,
+      last_used_at timestamptz NULL,
       visibility varchar(40) NOT NULL DEFAULT 'private',
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
@@ -206,7 +209,14 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS markdown_doc text;
     ALTER TABLE prompts ADD COLUMN IF NOT EXISTS ai_model varchar(120);
+    ALTER TABLE prompts ADD COLUMN IF NOT EXISTS usage_count int NOT NULL DEFAULT 0;
+    ALTER TABLE prompts ADD COLUMN IF NOT EXISTS last_used_at timestamptz NULL;
     ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS markdown_doc text;
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_prompts_last_used_at ON prompts(last_used_at);
+    CREATE INDEX IF NOT EXISTS idx_prompts_usage_count ON prompts(usage_count);
   `);
 
   for (let i = 0; i < DEFAULT_CATEGORIES.length; i++) {
@@ -225,6 +235,22 @@ async function findCategoryByName(name) {
   const created = await pool.query(
     'INSERT INTO categories (id, user_id, name, sort_order) VALUES ($1, NULL, $2, 999) RETURNING *',
     [id(), name]
+  );
+  return created.rows[0];
+}
+
+async function findOrCreateUserCategory(userId, name) {
+  const clean = String(name || '').trim().slice(0, 120);
+  if (!clean) throw Object.assign(new Error('分类名称不能为空'), { status: 400, code: 'VALIDATION_ERROR' });
+  const existing = await pool.query(
+    `SELECT * FROM categories WHERE (user_id=$1 OR user_id IS NULL) AND name=$2 ORDER BY user_id NULLS FIRST LIMIT 1`,
+    [userId, clean]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+  const created = await pool.query(
+    `INSERT INTO categories (id, user_id, name, description, sort_order)
+     VALUES ($1, $2, $3, $4, 900) RETURNING *`,
+    [id(), userId, clean, '用户自定义分类']
   );
   return created.rows[0];
 }
@@ -359,7 +385,15 @@ async function applyAnalysis(promptId, userId, content, model) {
     const categoryName = confidence < 0.5 ? '待人工确认' : analysis.category;
     const category = await findCategoryByName(categoryName);
     await pool.query(
-      `UPDATE prompts SET title=$1, summary=$2, markdown_doc=$3, category_id=$4, ai_status=$5, ai_confidence=$6, ai_model=$7, updated_at=now()
+      `UPDATE prompts
+       SET title=$1,
+           summary=$2,
+           markdown_doc=$3,
+           category_id=CASE WHEN is_manual_confirmed THEN category_id ELSE $4 END,
+           ai_status=$5,
+           ai_confidence=$6,
+           ai_model=$7,
+           updated_at=now()
        WHERE id=$8 AND user_id=$9`,
       [analysis.title || makeTitle(content), analysis.summary || '', analysis.markdownDoc || '', category.id, confidence < 0.5 ? 'need_review' : 'completed', confidence, analysis.usedModel || selectedModel, promptId, userId]
     );
@@ -452,23 +486,82 @@ app.get('/api/categories', authRequired, asyncRoute(async (req, res) => {
      ORDER BY c.sort_order ASC, c.name ASC`,
     [req.user.sub]
   );
-  res.json({ success: true, data: result.rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, promptCount: r.prompt_count })) });
+  res.json({ success: true, data: result.rows.map((r) => ({ id: r.id, name: r.name, description: r.description, sortOrder: r.sort_order, promptCount: r.prompt_count, isSystem: r.user_id === null })) });
+}));
+
+app.post('/api/categories', authRequired, asyncRoute(async (req, res) => {
+  const category = await findOrCreateUserCategory(req.user.sub, req.body.name);
+  res.json({ success: true, data: { id: category.id, name: category.name, description: category.description, sortOrder: category.sort_order, promptCount: 0, isSystem: category.user_id === null } });
+}));
+
+app.patch('/api/categories/:id', authRequired, asyncRoute(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 120);
+  if (!name) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '分类名称不能为空' } });
+  const result = await pool.query(
+    `UPDATE categories SET name=$1, description=$2, updated_at=now()
+     WHERE id=$3 AND user_id=$4
+     RETURNING *`,
+    [name, req.body.description || null, req.params.id, req.user.sub]
+  );
+  if (!result.rows[0]) return res.status(403).json({ success: false, error: { code: 'SYSTEM_CATEGORY_LOCKED', message: '系统分类不能改名，请新建自定义分类' } });
+  res.json({ success: true, data: { id: result.rows[0].id, name: result.rows[0].name, description: result.rows[0].description, sortOrder: result.rows[0].sort_order, isSystem: false } });
+}));
+
+app.delete('/api/categories/:id', authRequired, asyncRoute(async (req, res) => {
+  const category = await pool.query('SELECT * FROM categories WHERE id=$1 AND user_id=$2 LIMIT 1', [req.params.id, req.user.sub]);
+  if (!category.rows[0]) return res.status(403).json({ success: false, error: { code: 'SYSTEM_CATEGORY_LOCKED', message: '系统分类不能删除' } });
+  await pool.query('UPDATE prompts SET category_id=NULL, updated_at=now() WHERE category_id=$1 AND user_id=$2', [req.params.id, req.user.sub]);
+  await pool.query('DELETE FROM categories WHERE id=$1 AND user_id=$2', [req.params.id, req.user.sub]);
+  res.json({ success: true, data: { deleted: true } });
 }));
 
 app.get('/api/prompts', authRequired, asyncRoute(async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 20)));
+  const q = String(req.query.q || '').trim();
+  if (q && req.query.searchMode === 'semantic') {
+    const result = await pool.query(
+      `SELECT p.*, c.name AS category_name,
+        COALESCE(array_agg(t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tags
+       FROM prompts p
+       LEFT JOIN categories c ON c.id=p.category_id
+       LEFT JOIN prompt_tags pt ON pt.prompt_id=p.id
+       LEFT JOIN tags t ON t.id=pt.tag_id
+       WHERE p.user_id=$1 AND p.deleted_at IS NULL
+       GROUP BY p.id, c.name
+       ORDER BY p.updated_at DESC
+       LIMIT 500`,
+      [req.user.sub]
+    );
+    const ranked = result.rows
+      .map((row) => {
+        const haystack = `${row.title || ''}\n${row.summary || ''}\n${row.content || ''}\n${row.markdown_doc || ''}\n${(row.tags || []).join(' ')}`;
+        const score = Math.max(diceSimilarity(q, haystack), haystack.toLowerCase().includes(q.toLowerCase()) ? 0.5 : 0);
+        return { row, score };
+      })
+      .filter((item) => item.score >= 0.08)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => ({ ...promptRow(item.row), searchScore: Number(item.score.toFixed(3)) }));
+    const start = (page - 1) * pageSize;
+    return res.json({ success: true, data: { items: ranked.slice(start, start + pageSize), total: ranked.length, page, pageSize } });
+  }
   const where = ['p.user_id=$1', 'p.deleted_at IS NULL'];
   const params = [req.user.sub];
-  if (req.query.q) {
-    params.push(`%${req.query.q}%`);
+  if (q) {
+    params.push(`%${q}%`);
     where.push(`(p.title ILIKE $${params.length} OR p.content ILIKE $${params.length} OR p.summary ILIKE $${params.length} OR p.source_domain ILIKE $${params.length})`);
   }
   if (req.query.categoryId) { params.push(req.query.categoryId); where.push(`p.category_id=$${params.length}`); }
   if (req.query.sourceDomain) { params.push(req.query.sourceDomain); where.push(`p.source_domain=$${params.length}`); }
   if (req.query.favorite === 'true') where.push('p.is_favorite=true');
   if (req.query.aiStatus) { params.push(req.query.aiStatus); where.push(`p.ai_status=$${params.length}`); }
+  if (req.query.sort === 'recent_used') where.push('p.last_used_at IS NOT NULL');
   const whereSql = where.join(' AND ');
+  const orderSql = req.query.sort === 'frequent'
+    ? 'p.usage_count DESC, p.updated_at DESC'
+    : req.query.sort === 'recent_used'
+      ? 'p.last_used_at DESC, p.updated_at DESC'
+      : 'p.created_at DESC';
   const count = await pool.query(`SELECT COUNT(*)::int AS total FROM prompts p WHERE ${whereSql}`, params);
   params.push(pageSize, (page - 1) * pageSize);
   const result = await pool.query(
@@ -480,7 +573,7 @@ app.get('/api/prompts', authRequired, asyncRoute(async (req, res) => {
      LEFT JOIN tags t ON t.id=pt.tag_id
      WHERE ${whereSql}
      GROUP BY p.id, c.name
-     ORDER BY p.created_at DESC
+     ORDER BY ${orderSql}
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
@@ -504,6 +597,8 @@ function promptRow(r) {
     aiModel: r.ai_model,
     isFavorite: r.is_favorite,
     isManualConfirmed: r.is_manual_confirmed,
+    usageCount: Number(r.usage_count || 0),
+    lastUsedAt: r.last_used_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -595,6 +690,55 @@ app.get('/api/prompts/:id', authRequired, asyncRoute(async (req, res) => {
   if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
   const data = promptRow({ ...result.rows[0], tags: await getTagsForPrompt(req.params.id) });
   res.json({ success: true, data });
+}));
+
+app.get('/api/prompts/:id/versions', authRequired, asyncRoute(async (req, res) => {
+  const prompt = await pool.query('SELECT id FROM prompts WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL', [req.params.id, req.user.sub]);
+  if (!prompt.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
+  const result = await pool.query(
+    `SELECT v.*, c.name AS category_name
+     FROM prompt_versions v
+     LEFT JOIN categories c ON c.id=v.category_id
+     WHERE v.prompt_id=$1
+     ORDER BY v.created_at DESC`,
+    [req.params.id]
+  );
+  res.json({
+    success: true,
+    data: result.rows.map((r) => ({
+      id: r.id,
+      promptId: r.prompt_id,
+      title: r.title,
+      content: r.content,
+      summary: r.summary,
+      markdownDoc: r.markdown_doc,
+      category: r.category_id ? { id: r.category_id, name: r.category_name } : null,
+      changeNote: r.change_note,
+      createdAt: r.created_at,
+    }))
+  });
+}));
+
+app.post('/api/prompts/:id/versions/:versionId/restore', authRequired, asyncRoute(async (req, res) => {
+  const current = await pool.query('SELECT * FROM prompts WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL', [req.params.id, req.user.sub]);
+  if (!current.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
+  const version = await pool.query('SELECT * FROM prompt_versions WHERE id=$1 AND prompt_id=$2', [req.params.versionId, req.params.id]);
+  if (!version.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '版本不存在' } });
+  const old = current.rows[0];
+  await pool.query(
+    `INSERT INTO prompt_versions (id, prompt_id, title, content, summary, markdown_doc, category_id, changed_by, change_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id(), old.id, old.title, old.content, old.summary, old.markdown_doc, old.category_id, req.user.sub, '恢复版本前自动备份']
+  );
+  const v = version.rows[0];
+  await pool.query(
+    `UPDATE prompts
+     SET title=$1, content=$2, summary=$3, markdown_doc=$4, category_id=$5, is_manual_confirmed=true, ai_status='completed', updated_at=now()
+     WHERE id=$6 AND user_id=$7`,
+    [v.title, v.content, v.summary, v.markdown_doc, v.category_id, req.params.id, req.user.sub]
+  );
+  const detail = await getPromptWithTagsForUser(req.user.sub, req.params.id);
+  res.json({ success: true, data: detail });
 }));
 
 async function createPrompt(userId, body) {
@@ -698,6 +842,60 @@ app.post('/api/extension/save-selection', authRequired, asyncRoute(async (req, r
   res.json({ success: true, data: await createPrompt(req.user.sub, req.body) });
 }));
 
+function cleanPromptIds(ids) {
+  return [...new Set((Array.isArray(ids) ? ids : []).map(String).filter((item) => /^[0-9a-f-]{36}$/i.test(item)))].slice(0, 200);
+}
+
+app.post('/api/prompts/batch/categorize', authRequired, asyncRoute(async (req, res) => {
+  const ids = cleanPromptIds(req.body.ids);
+  if (!ids.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '请选择要整理的提示词' } });
+  let categoryId = req.body.categoryId || '';
+  if (!categoryId && req.body.categoryName) {
+    const category = await findOrCreateUserCategory(req.user.sub, req.body.categoryName);
+    categoryId = category.id;
+  }
+  const category = await pool.query(
+    `SELECT * FROM categories WHERE id=$1 AND (user_id=$2 OR user_id IS NULL) LIMIT 1`,
+    [categoryId, req.user.sub]
+  );
+  if (!category.rows[0]) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '分类不存在' } });
+  const result = await pool.query(
+    `UPDATE prompts
+     SET category_id=$1, is_manual_confirmed=true, ai_status='completed', updated_at=now()
+     WHERE user_id=$2 AND deleted_at IS NULL AND id=ANY($3::uuid[])
+     RETURNING id`,
+    [categoryId, req.user.sub, ids]
+  );
+  res.json({ success: true, data: { updated: result.rowCount, category: { id: category.rows[0].id, name: category.rows[0].name } } });
+}));
+
+app.post('/api/prompts/batch/reanalyze', authRequired, asyncRoute(async (req, res) => {
+  const ids = cleanPromptIds(req.body.ids);
+  if (!ids.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '请选择要整理的提示词' } });
+  const result = await pool.query(
+    'SELECT id, content FROM prompts WHERE user_id=$1 AND deleted_at IS NULL AND id=ANY($2::uuid[])',
+    [req.user.sub, ids]
+  );
+  for (const row of result.rows) {
+    await applyAnalysis(row.id, req.user.sub, row.content, req.body.aiModel);
+  }
+  res.json({ success: true, data: { updated: result.rowCount } });
+}));
+
+app.post('/api/prompts/batch/mark-error', authRequired, asyncRoute(async (req, res) => {
+  const ids = cleanPromptIds(req.body.ids);
+  if (!ids.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '请选择要整理的提示词' } });
+  const category = await findCategoryByName('错误提示词');
+  const result = await pool.query(
+    `UPDATE prompts
+     SET category_id=$1, is_manual_confirmed=true, ai_status='completed', updated_at=now()
+     WHERE user_id=$2 AND deleted_at IS NULL AND id=ANY($3::uuid[])
+     RETURNING id`,
+    [category.id, req.user.sub, ids]
+  );
+  res.json({ success: true, data: { updated: result.rowCount, category: { id: category.id, name: category.name } } });
+}));
+
 app.patch('/api/prompts/:id', authRequired, asyncRoute(async (req, res) => {
   const existing = await pool.query('SELECT * FROM prompts WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL', [req.params.id, req.user.sub]);
   if (!existing.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
@@ -725,6 +923,17 @@ app.post('/api/prompts/:id/favorite', authRequired, asyncRoute(async (req, res) 
   const result = await pool.query('UPDATE prompts SET is_favorite=$1, updated_at=now() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL RETURNING is_favorite', [Boolean(req.body.isFavorite), req.params.id, req.user.sub]);
   if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
   res.json({ success: true, data: { isFavorite: result.rows[0].is_favorite } });
+}));
+
+app.post('/api/prompts/:id/use', authRequired, asyncRoute(async (req, res) => {
+  const result = await pool.query(
+    `UPDATE prompts SET usage_count=usage_count+1, last_used_at=now(), updated_at=now()
+     WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL
+     RETURNING usage_count, last_used_at`,
+    [req.params.id, req.user.sub]
+  );
+  if (!result.rows[0]) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '提示词不存在' } });
+  res.json({ success: true, data: { usageCount: result.rows[0].usage_count, lastUsedAt: result.rows[0].last_used_at } });
 }));
 
 app.post('/api/prompts/:id/mark-error', authRequired, asyncRoute(async (req, res) => {
