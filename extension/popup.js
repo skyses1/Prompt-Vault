@@ -27,6 +27,19 @@ function domainFromUrl(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return ''; }
 }
 
+function fillTemplateVariables(text) {
+  const template = String(text || '');
+  const names = [...new Set([...template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1].trim()).filter(Boolean))];
+  if (!names.length) return template;
+  const values = {};
+  for (const name of names) {
+    const value = prompt(`填写变量：${name}`, '');
+    if (value === null) return null;
+    values[name] = value;
+  }
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name) => values[String(name).trim()] ?? '');
+}
+
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0];
@@ -229,12 +242,16 @@ function renderPrompts() {
   box.querySelectorAll('.fav').forEach((el) => {
     const p = state.filtered[Number(el.dataset.index)];
     el.querySelector('.insert').onclick = async () => {
-      await navigator.clipboard.writeText(p.content || '');
-      const ok = await insertIntoPage(p.content || '');
+      const text = fillTemplateVariables(p.content || '');
+      if (text === null) return;
+      await navigator.clipboard.writeText(text);
+      const ok = await insertIntoPage(text);
       msg(ok ? '已复制并插入当前输入框。' : '未找到输入框，已复制到剪贴板。', !ok);
     };
     el.querySelector('.copy').onclick = async () => {
-      await navigator.clipboard.writeText(p.content || '');
+      const text = fillTemplateVariables(p.content || '');
+      if (text === null) return;
+      await navigator.clipboard.writeText(text);
       msg('已复制到剪贴板。');
     };
   });
@@ -328,6 +345,19 @@ $('openWebBtn').onclick = async () => {
 $('openPanelBtn').onclick = async () => {
   const ok = await openPageSearchPanel();
   msg(ok ? '已在当前页面打开搜索框。' : '当前页面不允许注入搜索框，请换到 ChatGPT 等普通网页后再试。', !ok);
+};
+$('openSidePanelBtn').onclick = async () => {
+  try {
+    const tab = await getActiveTab();
+    if (tab?.windowId && chrome.sidePanel?.open) {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      msg('已打开浏览器侧边栏。');
+    } else {
+      msg('当前 Chrome 版本不支持插件侧边栏。', true);
+    }
+  } catch (error) {
+    msg(`侧边栏打开失败：${error.message}`, true);
+  }
 };
 $('search').oninput = () => {
   clearTimeout(state.searchTimer);
