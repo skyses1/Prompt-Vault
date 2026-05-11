@@ -269,10 +269,37 @@ function renderDetail() {
   loadVersions(p.id);
 }
 
-function copyText(text, tip) {
-  navigator.clipboard.writeText(text || '');
-  if (state.selected?.id) api(`/api/prompts/${state.selected.id}/use`, { method: 'POST', body: '{}' }).catch(() => {});
-  toast(tip);
+async function copyText(text, tip) {
+  const value = String(text || '');
+  if (!value) return toast('没有可复制的内容。', true);
+  try {
+    await writeClipboard(value);
+    if (state.selected?.id) api(`/api/prompts/${state.selected.id}/use`, { method: 'POST', body: '{}' }).catch(() => {});
+    toast(tip);
+  } catch (error) {
+    toast(`复制失败：${error.message}`, true);
+  }
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const ok = document.execCommand('copy');
+  textarea.remove();
+  if (!ok) throw new Error('浏览器拒绝写入剪贴板，请手动选中内容复制');
+  return true;
 }
 
 function renderBulkBar() {
