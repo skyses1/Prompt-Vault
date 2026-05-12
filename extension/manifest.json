@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "提示词金库采集器",
-  "version": "0.6.0",
-  "description": "保存选中文本、搜索收藏提示词，并插入到 AI 输入框。",
+  "name": "Prompt Vault Collector",
+  "version": "0.6.1",
+  "description": "Save selected text, organize prompts and notes, search the vault, and insert prompts into AI input boxes.",
   "permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs", "clipboardWrite", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
@@ -13,13 +13,6 @@
       "run_at": "document_idle"
     }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "提示词金库" },
+  "action": { "default_popup": "popup.html", "default_title": "Prompt Vault" },
   "side_panel": { "default_path": "sidepanel.html" }
 }
-
-
-
-
-
-
-
