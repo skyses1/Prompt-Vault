@@ -4,7 +4,7 @@
   "version": "0.6.1",
   "description": "Save selected text, organize prompts and notes, search the vault, and insert prompts into AI input boxes.",
   "permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs", "clipboardWrite", "sidePanel"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": ["http://1.5name.cn:3338/*", "http://1.5name.cn/*", "<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
