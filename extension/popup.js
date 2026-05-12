@@ -133,7 +133,7 @@ function showLogin(cfg = {}) {
   $('loginBox').classList.remove('hidden');
   $('consoleBox').classList.add('hidden');
   $('logoutBtn').classList.add('hidden');
-  $('apiBaseUrl').value = cfg.apiBaseUrl || 'http://10.10.10.68:8080/api';
+  $('apiBaseUrl').value = cfg.apiBaseUrl || 'http://1.5name.cn:8080/api';
   $('email').value = cfg.email || '';
 }
 
@@ -345,7 +345,7 @@ $('manualSaveBtn').onclick = async () => {
 };
 $('openWebBtn').onclick = async () => {
   const cfg = await chrome.storage.local.get(['apiBaseUrl']);
-  chrome.tabs.create({ url: webUrlFromApi(cfg.apiBaseUrl || 'http://10.10.10.68:8080/api') });
+  chrome.tabs.create({ url: webUrlFromApi(cfg.apiBaseUrl || 'http://1.5name.cn:8080/api') });
 };
 $('openPanelBtn').onclick = async () => {
   const ok = await openPageSearchPanel();
