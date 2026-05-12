@@ -232,6 +232,15 @@ function renderDetail() {
       <div><p class="eyebrow">${escapeHtml(p.contentTypeLabel || '提示词')} · ${escapeHtml(p.category?.name || '未分类')}</p><h3>${escapeHtml(p.title)}</h3></div>
       <button class="star" id="favBtn">${p.isFavorite ? '★' : '☆'}</button>
     </div>
+    <div class="actions detail-actions">
+      <button id="copyRawBtn" class="secondary">复制原文</button>
+      <button id="copyMdBtn" class="secondary">复制 Markdown</button>
+      <button id="editBtn" class="secondary">编辑</button>
+      <button id="reanalyzeBtn" class="secondary">重新分析</button>
+      <button id="markErrorBtn" class="secondary">归为错误</button>
+      <button id="moveReviewBtn" class="secondary">待人工确认</button>
+      <button id="deleteBtn" class="danger">删除</button>
+    </div>
     <p class="summary">${escapeHtml(p.summary || '暂无摘要')}</p>
     ${p.markdownDoc ? `<div class="markdown-doc">${renderMarkdown(p.markdownDoc)}</div>` : ''}
     <details class="raw-prompt" ${p.markdownDoc ? '' : 'open'}>
@@ -247,15 +256,6 @@ function renderDetail() {
       <dt>使用</dt><dd>${p.usageCount || 0} 次${p.lastUsedAt ? ` / 最近 ${new Date(p.lastUsedAt).toLocaleString()}` : ''}</dd>
       <dt>更新时间</dt><dd>${new Date(p.updatedAt).toLocaleString()}</dd>
     </dl>
-    <div class="actions">
-      <button id="copyRawBtn" class="secondary">复制原文</button>
-      <button id="copyMdBtn" class="secondary">复制 Markdown</button>
-      <button id="markErrorBtn" class="secondary">归为错误</button>
-      <button id="moveReviewBtn" class="secondary">待人工确认</button>
-      <button id="editBtn" class="secondary">编辑</button>
-      <button id="reanalyzeBtn" class="secondary">重新分析</button>
-      <button id="deleteBtn" class="danger">删除</button>
-    </div>
     <details class="versions">
       <summary>版本历史</summary>
       <div id="versionList" class="version-list">加载中...</div>
@@ -263,7 +263,7 @@ function renderDetail() {
   `;
   $('favBtn').onclick = toggleFavorite;
   $('copyMdBtn').onclick = () => copyText(p.markdownDoc || `# ${p.title}\n\n## 原始提示词\n${p.content}`, '已复制 Markdown。');
-  $('copyRawBtn').onclick = () => copyText(formatRawPromptMarkdown(p), '已复制 Markdown 格式原文。');
+  $('copyRawBtn').onclick = () => copyText(p.content || '', '已复制原文。');
   $('markErrorBtn').onclick = markError;
   $('moveReviewBtn').onclick = moveReview;
   $('editBtn').onclick = openEditDialog;
@@ -411,6 +411,7 @@ function openNewDialog() {
   $('autoAnalyze').checked = true;
   $('aiModel').value = state.defaultAiModel || state.aiModels[0] || '';
   message('dialogMessage', '');
+  setSaveStatus('');
   $('promptDialog').showModal();
 }
 
@@ -426,6 +427,7 @@ function openEditDialog() {
   $('autoAnalyze').checked = false;
   $('aiModel').value = p.aiModel || state.defaultAiModel || state.aiModels[0] || '';
   message('dialogMessage', '');
+  setSaveStatus('');
   $('promptDialog').showModal();
 }
 
@@ -496,6 +498,7 @@ function duplicateConfirmMessage(matches) {
 
 async function submitPromptForm(forceSave) {
   const editId = $('editId').value;
+  const saveBtn = $('savePromptBtn');
   const body = {
     title: $('promptTitle').value.trim(),
     content: $('promptContent').value.trim(),
@@ -507,21 +510,41 @@ async function submitPromptForm(forceSave) {
     forceSave,
   };
   try {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
+    setSaveStatus('保存中...', false);
     let data;
     if (editId) {
       data = await api(`/api/prompts/${editId}`, { method: 'PATCH', body: JSON.stringify({ ...body, isManualConfirmed: true }) });
     } else {
       data = await api('/api/prompts', { method: 'POST', body: JSON.stringify(body) });
     }
+    setSaveStatus('保存成功', false);
+    toast(`保存成功：${data.title || '已保存'}`);
+    await new Promise((resolve) => setTimeout(resolve, 450));
     $('promptDialog').close();
     await loadPrompts();
     await selectPrompt(data.id);
   } catch (err) {
     if (!editId && err.code === 'DUPLICATE_PROMPT' && confirm(duplicateConfirmMessage(err.details?.matches))) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
+      setSaveStatus('');
       return submitPromptForm(true);
     }
+    setSaveStatus('保存失败', true);
     message('dialogMessage', err.message, true);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '保存';
   }
+}
+
+function setSaveStatus(text, bad = false) {
+  const el = $('saveStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('error', Boolean(bad));
 }
 
 async function toggleFavorite() {
