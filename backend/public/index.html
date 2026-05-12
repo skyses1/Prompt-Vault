@@ -136,7 +136,8 @@
       <label class="check"><input id="autoAnalyze" type="checkbox" checked /> 保存后使用通义/本地规则自动整理</label>
       <div class="dialog-actions">
         <button type="button" id="cancelDialog" class="ghost">取消</button>
-        <button type="submit" class="primary">保存</button>
+        <button id="savePromptBtn" type="submit" class="primary">保存</button>
+        <strong id="saveStatus" class="save-status"></strong>
       </div>
       <p id="dialogMessage" class="message"></p>
     </form>
