@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Prompt Vault Collector",
-  "version": "0.6.1",
+  "version": "0.7.1",
   "description": "Save selected text, organize prompts and notes, search the vault, and insert prompts into AI input boxes.",
   "permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs", "clipboardWrite", "sidePanel"],
   "host_permissions": ["http://1.5name.cn:3338/*", "http://1.5name.cn/*", "<all_urls>"],
